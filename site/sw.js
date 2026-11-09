@@ -1,6 +1,6 @@
 /* The Daily Brief - lets the page open fast and work offline with the last news it saw. */
-const V = 'brief-v1';
-const SHELL = ['./', 'index.html', 'app.css', 'app.js', 'vendor/d3.min.js', 'vendor/topojson-client.min.js', 'vendor/world-lite.json', 'vendor/fonts.css', 'icon.svg'];
+const V = 'brief-v2';
+const SHELL = ['./', 'index.html', 'app.css', 'app.js', 'theme.js', 'vendor/d3.min.js', 'vendor/topojson-client.min.js', 'vendor/world-lite.json', 'vendor/fonts.css', 'icon.svg'];
 self.addEventListener('install', (e) => { e.waitUntil(caches.open(V).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', (e) => { e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== V).map((k) => caches.delete(k)))).then(() => self.clients.claim())); });
 self.addEventListener('fetch', (e) => {

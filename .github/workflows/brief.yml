@@ -2,6 +2,8 @@
 # Your computer can be off. Setup steps are in README.md.
 name: Daily Brief
 on:
+  push:
+    branches: [main]
   schedule:
     - cron: "*/15 * * * *"
   workflow_dispatch:

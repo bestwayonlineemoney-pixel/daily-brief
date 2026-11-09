@@ -1,4 +1,4 @@
-/* The Daily Brief - front end. Reads data/today.json (written by the collector) and draws the whole day.
+/* The Daily Brief - front end. Reads data/today.json (written by the collector) and lays the day out for reading.
    Every picture is drawn here from data (globes, maps, charts, patterns). No news photos are used. */
 'use strict';
 (function () {
@@ -30,49 +30,8 @@
   function svg(vb, inner) { const s = document.createElementNS(NS, 'svg'); s.setAttribute('viewBox', vb); s.setAttribute('preserveAspectRatio', 'xMidYMid slice'); s.setAttribute('aria-hidden', 'true'); s.innerHTML = inner; return s; }
   function toast(msg) { const t = $('toast'); t.textContent = msg; t.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(() => { t.hidden = true; }, 2200); }
 
-  /* ---------------- topics ---------------- */
-  const CATS = ['world', 'war', 'economy', 'home', 'crypto', 'tech', 'science', 'sport'];
-  const CAT = { world: ['World', '#7FB2FF'], war: ['War & conflict', '#FF6B5A'], economy: ['Economy & markets', '#FFD166'], crypto: ['Crypto', '#C6FF3D'],
-    tech: ['Tech & AI', '#C59BFF'], science: ['Science & health', '#4FD1C5'], sport: ['Sport', '#FFA94D'], home: ['Home', '#FF8AD8'] };
-  const SHORT = { world: 'World', war: 'War', economy: 'Economy', crypto: 'Crypto', tech: 'Tech & AI', science: 'Science', sport: 'Sport', home: 'Home' };
-  const col = (c) => (CAT[c] || CAT.world)[1];
-  const cname = (c) => (CAT[c] || CAT.world)[0];
-  const TOP_CAP = { world: 4, war: 4, economy: 4, crypto: 3, tech: 3, science: 2, sport: 1, home: 2 };
-
-  /* ---------------- state ---------------- */
-  let LIVE = null, D = null, DAYS = [], DAY = null, MK = {}, BYID = {};
-  let view = S.get('view', 'front'), query = '';
-  let stars = S.get('stars', {}), watch = S.get('watch', null), alerts = S.get('alerts', false);
-  const prevVisit = S.get('lastVisit', 0);
-  let TOPO = null, FEATS = [], CENT = {}, MESH = null, GRAT = d3.geoGraticule10();
-  const CENT_FIX = { 'United States of America': [-98, 39], France: [2.3, 46.6], Russia: [40, 56], Norway: [9, 61], Canada: [-98, 57], Netherlands: [5.3, 52.2], Denmark: [9.5, 56], Chile: [-71, -34], 'New Zealand': [172, -41], Indonesia: [113, -2], Malaysia: [102, 4] };
-
-  /* ---------------- data ---------------- */
-  async function getJSON(u) { const r = await fetch(u + (u.includes('?') ? '&' : '?') + 't=' + Date.now(), { cache: 'no-store' }); if (!r.ok) throw new Error(r.status); return r.json(); }
-  function prepare(d) {
-    d.stories = d.stories || [];
-    BYID = {}; d.stories.forEach((s) => { BYID[s.id] = s; });
-    if (!d.top || !d.top.length) { const per = {}; d.top = [];
-      [...d.stories].sort((a, b) => (b.peak || b.score) - (a.peak || a.score)).forEach((s) => { if (d.top.length >= 12 || (per[s.cat] || 0) >= (TOP_CAP[s.cat] || 2)) return; d.top.push(s.id); per[s.cat] = (per[s.cat] || 0) + 1; }); }
-    MK = {}; (d.markets || []).forEach((m) => { MK[m.k] = m; });
-    CAT.home[0] = d.home_title || 'Home'; SHORT.home = d.home_title || 'Home';
-    if (watch == null) watch = d.watchlist_default || [];
-    return d;
-  }
-  const storiesOf = (c) => D.stories.filter((s) => c === 'home' ? s.home : s.cat === c).sort((a, b) => (b.peak || b.score) - (a.peak || a.score));
-  const topStories = () => D.top.map((id) => BYID[id]).filter(Boolean);
-  const watchRx = () => { const w = (watch || []).map((x) => x.trim()).filter(Boolean); return w.length ? new RegExp('\\b(' + w.map((x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')', 'i') : null; };
-  let WRX = null;
-  const watched = (s) => !!WRX && (WRX.test(s.title) || (s.reports || []).some((r) => WRX.test(r.t)));
-  const isNew = (s) => !DAY && prevVisit > 0 && s.first > prevVisit;
-
   /* ---------------- pictures (all drawn from data) ---------------- */
   function marketFor(s) { for (const k of s.kw || []) { const m = MK[k]; if (m && m.spark && m.spark.length > 3) return m; } return null; }
-  function fmtP(m, p) { p = isNum(p) ? p : m.p; if (!isNum(p)) return '—';
-    const k = m.k; if (k === 'tnx') return p.toFixed(2) + '%'; if (k === 'spx' || k === 'ndx') return p.toLocaleString(undefined, { maximumFractionDigits: 0 });
-    if (k === 'eur' || k === 'xrp') return (k === 'xrp' ? '$' : '') + p.toFixed(4); if (k === 'lkr' || k === 'dxy' || k === 'vix') return p.toFixed(2);
-    return '$' + p.toLocaleString(undefined, { maximumFractionDigits: p >= 1000 ? 0 : 2 }); }
-  const fmtC = (c) => isNum(c) ? (c >= 0 ? '+' : '') + c.toFixed(2) + '%' : '';
   function sparkPath(v, x0, x1, y0, y1) { v = (v || []).filter(isNum); if (v.length < 2) return ''; const mn = Math.min(...v), mx = Math.max(...v);
     return v.map((x, i) => (i ? 'L' : 'M') + (x0 + i / (v.length - 1) * (x1 - x0)).toFixed(1) + ' ' + (y1 - (x - mn) / (mx - mn || 1) * (y1 - y0)).toFixed(1)).join(' '); }
   let gid = 0;
@@ -104,14 +63,14 @@
       <circle cx="${cx}" cy="${cy}" r="${R}" fill="none" stroke="#fff" stroke-opacity=".14" stroke-width="1.5"/>`);
   }
   function artMarket(s, m) {
-    const c = col(s.cat), id = 'm' + (++gid), r = rand(s.id), d = sparkPath(m.spark, 0, 600, 150, 440), up = (m.chg || 0) >= 0;
-    const v = m.spark.filter(isNum); void up; const mn = Math.min(...v), mx = Math.max(...v), ly = 440 - (v[v.length - 1] - mn) / (mx - mn || 1) * 290;
+    const c = col(s.cat), id = 'm' + (++gid), r = rand(s.id), d = sparkPath(m.spark, 0, 600, 205, 420), up = (m.chg || 0) >= 0;
+    const v = m.spark.filter(isNum); void up; const mn = Math.min(...v), mx = Math.max(...v), ly = 420 - (v[v.length - 1] - mn) / (mx - mn || 1) * 215;
     let grid = ''; for (let i = 1; i < 12; i++) grid += `<line x1="0" y1="${i * 50}" x2="600" y2="${i * 50}" stroke="#fff" stroke-opacity=".045"/><line x1="${i * 50}" y1="0" x2="${i * 50}" y2="600" stroke="#fff" stroke-opacity=".045"/>`;
     let bars = ''; for (let i = 0; i < 30; i++) { const h = 20 + r() * 70; bars += `<rect x="${i * 20 + 3}" y="${600 - h}" width="12" height="${h}" fill="${c}" opacity=".08"/>`; }
     return svg('0 0 600 600', `<defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${c}" stop-opacity=".45"/><stop offset="1" stop-color="${c}" stop-opacity="0"/></linearGradient>
       <radialGradient id="${id}r" cx="80%" cy="20%" r="80%"><stop offset="0" stop-color="${c}" stop-opacity=".18"/><stop offset="1" stop-color="#0d0d10"/></radialGradient></defs>
       <rect width="600" height="600" fill="#0d0d10"/><rect width="600" height="600" fill="url(#${id}r)"/>${grid}${bars}
-      <text x="-12" y="250" font-family="Anton,Impact" font-size="300" fill="${c}" opacity=".07">${esc(m.sym.replace(/[^A-Z0-9&]/gi, '').slice(0, 4))}</text>
+      <text x="300" y="330" text-anchor="middle" font-family="Anton,Impact" font-size="170" fill="${c}" opacity=".08">${esc(m.name.split(/[ /]/)[0].toUpperCase().slice(0, 7))}</text>
       <path d="${d} L600 600 L0 600 Z" fill="url(#${id})"/><path d="${d}" fill="none" stroke="${c}" stroke-width="5" stroke-linejoin="round"/>
       <circle cx="598" cy="${ly}" r="22" fill="${c}" opacity=".2"/><circle cx="598" cy="${ly}" r="8" fill="${c}"/>`);
   }
@@ -164,48 +123,10 @@
     if (s.cat === 'economy') { const m = MK.spx; if (m && m.spark && m.spark.length > 3) return artMarket(s, m); }
     return artFlat(s);
   }
-  function artMarketOf(s) { const m = marketFor(s); if (m && (s.cat === 'economy' || s.cat === 'crypto')) return m;
-    if (s.places && s.places.length && FEATS.length && !['sport', 'tech', 'science'].includes(s.cat)) return null;
-    if (s.cat === 'crypto' && MK.btc && (MK.btc.spark || []).length > 3) return MK.btc; if (s.cat === 'economy' && MK.spx && (MK.spx.spark || []).length > 3) return MK.spx; return null; }
-  function mchip(m) { return el('span', { class: 'mchip' }, m.name + ' ', el('b', { text: fmtP(m) }), ' ', el('i', { class: (m.chg || 0) >= 0 ? 'u' : 'd', text: fmtC(m.chg) })); }
-  function artFor(s, big) {
-    const m = marketFor(s);
-    if (m && (s.cat === 'economy' || s.cat === 'crypto')) return artMarket(s, m);
-    if (s.places && s.places.length && FEATS.length && !['sport', 'tech', 'science'].includes(s.cat)) return artGlobe(s, big);
-    if (s.places && s.places.length && FEATS.length && s.cat === 'science' && /quake|storm|flood|fire|hurricane|cyclone/i.test(s.title)) return artGlobe(s, big);
-    return FEATS.length || !['world', 'war', 'home'].includes(s.cat) ? artPattern(s) : svg('0 0 600 600', '<rect width="600" height="600" fill="#101014"/>');
-  }
   /* draw pictures only when they come near the screen (fast on phones) */
   const lazy = 'IntersectionObserver' in window ? new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) { lazy.unobserve(e.target); paint(e.target); } }), { rootMargin: '400px' }) : null;
   function paint(box) { if (box.dataset.done) return; const s = BYID[box.dataset.id] || box._s; if (!s) return; box.dataset.done = 1; clear(box).append(artFor(s, box.dataset.big)); }
   function artBox(s, big) { const b = el('div', { class: 'art', 'data-id': s.id }); b._s = s; if (big) b.dataset.big = 1; if (lazy) lazy.observe(b); else paint(b); return b; }
-
-  /* ---------------- small pieces ---------------- */
-  function badges(s, light) {
-    const out = [];
-    if (s.breaking && !DAY) out.push(el('span', { class: 'badge brk', text: 'BREAKING' }));
-    if (isNew(s)) out.push(el('span', { class: 'badge new', text: 'NEW' }));
-    if (watched(s)) out.push(el('span', { class: 'badge watch', text: '★ WATCH' }));
-    out.push(el('span', { class: 'badge ' + (s.status === 'VERIFIED' ? 'v' : s.status === 'OFFICIAL' ? 'o' : 's'), text: s.status === 'VERIFIED' ? '✓ ' + s.n + ' SOURCES' : s.status }));
-    if (s.developing && !light) out.push(el('span', { class: 'badge devb', text: 'DEVELOPING · DAY ' + Math.max(2, Math.ceil((s.last - s.first) / 86400)) }));
-    return out;
-  }
-  function card(s, cls) {
-    const c = col(s.cat);
-    return el('button', { class: 'card ' + (cls || '') + (watched(s) ? ' watched' : ''), style: { '--c': c }, onclick: () => openStory(s.id), 'aria-label': s.title },
-      artBox(s, cls === 'lead'), el('div', { class: 'shade' }),
-      el('div', { class: 'in' }, el('div', { class: 'tags' }, el('span', { class: 'cat', text: SHORT[s.cat] }), badges(s, true)),
-        artMarketOf(s) ? mchip(artMarketOf(s)) : null, el('h2', { class: 'hl', text: s.title }),
-        el('div', { class: 'cfoot' }, el('span', { class: 'src', text: (s.orgs || []).slice(0, 3).join(' · ') + (s.orgs.length > 3 ? ' +' + (s.orgs.length - 3) : '') + ' · ' + ago(s.last) }), el('span', { class: 'go', text: '→' }))));
-  }
-  function row(s) {
-    return el('div', { class: 'it' + (watched(s) ? ' watched' : ''), role: 'button', tabindex: 0, onclick: () => openStory(s.id), onkeydown: (e) => { if (e.key === 'Enter') openStory(s.id); } },
-      el('div', { class: 't', text: s.title }), el('div', { class: 'n' }, String(s.n || 1), el('small', { text: (s.n || 1) > 1 ? 'SOURCES' : 'SOURCE' })),
-      el('div', { class: 'm' }, el('span', { class: 'dot', style: { '--c': col(s.cat) } }), SHORT[s.cat], badges(s, true), '·', ago(s.last), '·', (s.orgs || []).slice(0, 4).join(', ')));
-  }
-  function sec(title, c, sub, kids, more) {
-    return el('section', { class: 'sec', style: { '--c': c } }, el('div', { class: 'sec-h' }, el('h2', { text: title }), sub ? el('span', { text: sub }) : null, more || null), kids);
-  }
 
   /* ---------------- the live globe ---------------- */
   let GLOBE = null; const GROT = { r: null };
@@ -249,7 +170,7 @@
         ctx.beginPath(); ctx.arc(x, y, r0, 0, 7); ctx.fillStyle = c; ctx.fill();
         ctx.beginPath(); ctx.arc(x, y, r0 * .4, 0, 7); ctx.fillStyle = '#fff'; ctx.fill();
         if ((i < 5 || p === hover) && labels < 6) { labels++; ctx.font = '600 12px "JetBrains Mono",monospace'; const tw = ctx.measureText(p.label.toUpperCase()).width;
-          ctx.fillStyle = 'rgba(10,10,12,.78)'; ctx.fillRect(x + r0 + 6, y - 10, tw + 12, 20); ctx.fillStyle = '#fff'; ctx.fillText(p.label.toUpperCase(), x + r0 + 12, y + 4); } });
+          const lx = x + r0 + 6 + tw + 12 > W - 4 ? x - r0 - 6 - tw - 12 : x + r0 + 6; ctx.fillStyle = 'rgba(10,10,12,.78)'; ctx.fillRect(lx, y - 10, tw + 12, 20); ctx.fillStyle = '#fff'; ctx.fillText(p.label.toUpperCase(), lx + 6, y + 4); } });
       ctx.beginPath(); path({ type: 'Sphere' }); ctx.strokeStyle = 'rgba(255,255,255,.14)'; ctx.lineWidth = 1.2; ctx.stroke();
     }
     function loop(t) { raf = requestAnimationFrame(loop); if (document.hidden || !visible || t - last < 33) return; const dt = Math.min(100, t - last); last = t;
@@ -275,269 +196,6 @@
     return P;
   }
 
-  /* ---------------- page parts ---------------- */
-  function renderTicker() {
-    const order = ['btc', 'eth', 'sol', 'spx', 'ndx', 'gold', 'oil', 'dxy', 'tnx', 'vix', 'eur', 'lkr', 'xrp'];
-    const items = order.map((k) => MK[k]).filter((m) => m && isNum(m.p)).map((m) => el('span', null, m.name, el('em', { text: fmtP(m) }), el('b', { class: (m.chg || 0) >= 0 ? 'u' : 'd', text: ((m.chg || 0) >= 0 ? '▲ ' : '▼ ') + fmtC(m.chg) })));
-    if (D.fng) items.push(el('span', null, 'Crypto Fear & Greed', el('em', { text: D.fng.v + ' · ' + D.fng.label })));
-    if (!items.length) items.push(el('span', null, 'Market numbers appear after the first update'));
-    clear($('tick')).append(...items, ...items.map((n) => n.cloneNode(true)));
-  }
-  function renderNav() {
-    const counts = {}; CATS.forEach((c) => { counts[c] = c === 'home' ? D.stories.filter((s) => s.home).length : D.stories.filter((s) => s.cat === c).length; });
-    const nstar = Object.keys(stars).length;
-    const btn = (k, label, c, n) => el('button', { class: view === k && !query ? 'on' : '', style: c ? { '--c': c } : null, onclick: () => go(k) }, c ? el('span', { class: 'sw', style: { '--c': c } }) : null, label, n ? el('span', { class: 'n', text: n }) : null);
-    clear($('nav')).append(btn('front', 'Front page', null), ...CATS.map((c) => btn(c, SHORT[c], col(c), counts[c])), btn('saved', '☆ Saved', '#FFD166', nstar));
-  }
-  function renderBar() {
-    const p = $('date'); clear(p).append(el('i'), DAY ? new Date(DAY + 'T12:00:00').toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) + ' · archive'
-      : new Date().toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) + ' · live');
-    p.classList.toggle('arch', !!DAY);
-    const m = $('meta'); clear(m);
-    const f = D.feeds || {};
-    m.append(`${D.stories.length ? (D.total || D.stories.length) : 0} stories · ${D.outlets || new Set(D.stories.flatMap((s) => s.orgs)).size} newsrooms & official sources` + (f.total ? ` · ${f.ok}/${f.total} sources reachable` : '') + (D.updated ? ' · updated ' + ago(D.updated) : ''));
-    if (!DAY && location.protocol.startsWith('http')) m.append(' · ', el('a', { href: '#', style: { color: '#C6FF3D' }, onclick: (e) => { e.preventDefault(); refreshNow(); }, text: '↻ refresh' }));
-    const i = DAYS.indexOf(DAY || (LIVE && LIVE.date));
-    $('prevDay').disabled = !(DAYS.length && (DAY ? i < DAYS.length - 1 : DAYS.some((d) => d < LIVE.date)));
-    $('nextDay').disabled = !DAY;
-    const nn = D.stories.filter(isNew).length, chip = $('newChip');
-    chip.hidden = !(nn && !DAY); if (nn) chip.textContent = `✦ ${nn} new since you were here ${ago(prevVisit)}`;
-  }
-  function renderBreaking() {
-    const b = clear($('breaking')); if (DAY) return;
-    const br = D.stories.filter((s) => s.breaking).sort((a, b) => b.n - a.n).slice(0, 2);
-    br.forEach((s) => b.append(el('div', { class: 'breaking', onclick: () => openStory(s.id) }, el('span', { class: 'lbl', text: 'BREAKING' }), el('span', { class: 't', text: s.title }), el('small', { text: s.n + ' newsrooms · ' + ago(s.first) }))));
-  }
-  function briefBox() {
-    const B = D.brief || { lines: [] };
-    const box = el('div', { class: 'box brief' }, el('h3', { text: 'The day in 60 seconds' }),
-      el('div', { class: 'sub', text: B.by === 'ai' ? 'Written by AI from today\'s top headlines · ' + ago(B.at) : 'The most important story in each area right now' }),
-      el('span', { class: 'by', text: B.by === 'ai' ? 'AI SUMMARY' : 'AUTO' }));
-    const ol = el('ol');
-    (B.lines || []).forEach((L) => { const s = BYID[(L.ids || [])[0]]; const c = s ? col(s.cat) : '#C6FF3D';
-      ol.append(el('li', { style: { '--c': c }, onclick: () => s && openStory(s.id) }, el('div', null, el('div', { class: 'tx', text: L.text }),
-        s ? el('span', { class: 'who', text: SHORT[s.cat] + ' · ' + (s.n > 1 ? s.n + ' newsrooms' : s.status === 'OFFICIAL' ? 'official' : '1 source') + ' · ' + ago(s.last) }) : null))); });
-    if (!(B.lines || []).length) ol.append(el('li', null, el('div', { class: 'tx', text: 'Waiting for the first stories…' })));
-    box.append(ol); return box;
-  }
-  function globeBox(list) {
-    const box = el('div', { class: 'box globe-box' });
-    box.append(el('div', { class: 'gh' }, el('h3', { text: 'Where it\'s happening' }), el('div', { class: 'sub', text: 'Drag to turn · tap a dot for its stories' })));
-    const lg = el('div', { class: 'legend' }); ['war', 'world', 'economy', 'crypto', 'tech', 'science', 'home'].forEach((c) => lg.append(el('span', null, el('i', { style: { '--c': col(c) } }), SHORT[c])));
-    box.append(lg);
-    const pl = el('div', { class: 'places' }, el('div', { class: 'ph', text: 'MOST NEWS TODAY' })); box.append(pl);
-    requestAnimationFrame(() => { if (!FEATS.length) return; const P = mountGlobe(box, list);
-      P.slice(0, 10).forEach((p) => pl.append(el('button', { style: { '--c': col(p.cat) }, onclick: () => { if (GLOBE) GLOBE.spinTo(p.ll); openPlace(p.label); } }, el('i'), p.label, el('b', { text: p.n })))); });
-    return box;
-  }
-  function numsBox() {
-    const box = el('div', { class: 'box' }, el('h3', { text: 'Numbers of the day' }), el('div', { class: 'sub', text: 'Last price · change on the day' }));
-    const g = el('div', { class: 'nums' });
-    ['btc', 'spx', 'gold', 'oil'].map((k) => MK[k]).filter(Boolean).forEach((m) => g.append(numTile(m)));
-    box.append(g);
-    if (D.fng) box.append(el('div', { style: { marginTop: '12px' } }, fngGauge(D.fng)));
-    return box;
-  }
-  function numTile(m) {
-    const up = (m.chg || 0) >= 0, c = up ? '#4ADE80' : '#F87171', d = sparkPath(m.spark, 0, 200, 4, 38);
-    const t = el('div', { class: 'num', title: m.src ? 'Source: ' + m.src : '' }, el('div', { class: 'k', text: m.name }), el('div', { class: 'v', text: fmtP(m) }), el('div', { class: 'c', style: { color: c }, text: m.err ? 'not available now' : fmtC(m.chg) }));
-    if (d) t.append(svg('0 0 200 40', `<path d="${d} L200 40 L0 40 Z" fill="${c}" fill-opacity=".1"/><path d="${d}" fill="none" stroke="${c}" stroke-width="1.6"/>`));
-    t.querySelector('svg') && t.querySelector('svg').setAttribute('preserveAspectRatio', 'none');
-    return t;
-  }
-  function fngGauge(f) {
-    const a = Math.PI * (1 - f.v / 100), x = 60 + Math.cos(a) * 46, y = 62 - Math.sin(a) * 46;
-    const c = f.v < 25 ? '#F87171' : f.v < 45 ? '#FFA94D' : f.v < 56 ? '#FFD166' : f.v < 76 ? '#A3E635' : '#4ADE80';
-    return el('div', { class: 'gauge' }, svg('0 0 120 70', `<defs><linearGradient id="fg${++gid}"><stop offset="0" stop-color="#F87171"/><stop offset=".5" stop-color="#FFD166"/><stop offset="1" stop-color="#4ADE80"/></linearGradient></defs>
-      <path d="M14 62 A46 46 0 0 1 106 62" fill="none" stroke="url(#fg${gid})" stroke-width="10" stroke-linecap="round"/><line x1="60" y1="62" x2="${x}" y2="${y}" stroke="#fff" stroke-width="3" stroke-linecap="round"/><circle cx="60" cy="62" r="5" fill="#fff"/>`),
-      el('div', null, el('div', { class: 'v', style: { color: c }, text: f.v }), el('div', { class: 'l', text: f.label }), el('small', { text: 'Crypto Fear & Greed index' })));
-  }
-  function developing(list) {
-    const L = list.filter((s) => s.developing).sort((a, b) => b.score - a.score).slice(0, 8); if (!L.length) return null;
-    return sec('Developing stories', '#FFD166', 'Still moving · started earlier, new reports today', el('div', { class: 'devrow' }, L.map((s) => {
-      const span = Math.max(1, s.last - s.first), tl = el('div', { class: 'tl' });
-      (s.reports || []).forEach((r) => tl.append(el('i', { style: { left: ((r.ts - s.first) / span * 100).toFixed(1) + '%' }, title: r.o + ' · ' + dshort(r.ts) + ' ' + hm(r.ts) })));
-      tl.append(el('small', { style: { left: 0 }, text: dshort(s.first) }), el('small', { style: { right: 0 }, text: 'latest ' + hm(s.last) }));
-      return el('button', { class: 'dev', onclick: () => openStory(s.id) }, el('div', { class: 'tags' }, el('span', { class: 'cat', style: { '--c': col(s.cat) }, text: SHORT[s.cat] }), badges(s)),
-        el('div', { class: 't', text: s.title }), el('div', { class: 'kicker', text: s.n + ' newsrooms · ' + (s.reports || []).length + ' reports' }), tl);
-    })));
-  }
-  function loudness() {
-    const P = D.pulse; if (!P || !P.cats) return null;
-    const W = 720, H = 220, pad = 26, bw = (W - pad) / 24, tot = Array.from({ length: 24 }, (_, i) => CATS.reduce((a, c) => a + ((P.cats[c] || [])[i] || 0), 0)), mx = Math.max(1, ...tot);
-    let o = '';
-    for (let i = 0; i < 24; i++) { let y = H - 24; CATS.forEach((c) => { const v = (P.cats[c] || [])[i] || 0; if (!v) return; const h = v / mx * (H - 50); y -= h;
-        o += `<rect x="${pad + i * bw + 2}" y="${y.toFixed(1)}" width="${(bw - 4).toFixed(1)}" height="${h.toFixed(1)}" rx="2" fill="${col(c)}" opacity=".9"><title>${esc(SHORT[c])}: ${v} reports · ${hm(P.start + i * 3600)}</title></rect>`; });
-      if (i % 3 === 0 || i === 23) o += `<text x="${pad + i * bw + bw / 2}" y="${H - 6}" text-anchor="middle" font-size="11" fill="#71727D" font-family="JetBrains Mono,monospace">${i === 23 ? 'now' : hm(P.start + i * 3600)}</text>`; }
-    o += `<text x="0" y="14" font-size="11" fill="#71727D" font-family="JetBrains Mono,monospace">${mx}</text><line x1="${pad}" y1="${H - 24}" x2="${W}" y2="${H - 24}" stroke="#fff" stroke-opacity=".1"/>`;
-    const s = svg(`0 0 ${W} ${H}`, o); s.setAttribute('preserveAspectRatio', 'none');
-    const lg = el('div', { class: 'legend', style: { position: 'static', maxWidth: 'none', marginTop: '10px' } }); CATS.forEach((c) => lg.append(el('span', null, el('i', { style: { '--c': col(c) } }), SHORT[c])));
-    const peak = tot.indexOf(mx);
-    return el('div', { class: 'box loud' }, el('h3', { text: 'How loud the news was' }), el('div', { class: 'sub', text: `Reports per hour, last 24 hours · busiest hour ${hm(P.start + peak * 3600)}` }), s, lg);
-  }
-  function where(list) {
-    const P = placeIndex(list).slice(0, 9); if (!P.length) return null; const mx = P[0].n;
-    return el('div', { class: 'box where' }, el('h3', { text: 'Where the news is' }), el('div', { class: 'sub', text: 'Places named in today\'s stories' }),
-      P.map((p, i) => el('div', { class: 'row', style: { '--c': col(p.cat) }, onclick: () => openPlace(p.label) }, el('span', { class: 'rk', text: i + 1 }), el('span', { text: p.label }), el('span', { class: 'kicker', text: p.n + (p.n > 1 ? ' stories' : ' story') }),
-        el('div', { class: 'bar' }, el('i', { style: { width: (p.n / mx * 100) + '%' } })))));
-  }
-  function board() {
-    const L = (D.markets || []).filter((m) => isNum(m.p)); if (!L.length) return null;
-    const g = el('div', { class: 'board' }, L.map(numTile)); if (D.fng) g.append(el('div', { class: 'num fngt' }, fngGauge(D.fng)));
-    return sec('Markets at a glance', '#F4F4F6', 'For the big picture, not for trading · CoinGecko & Yahoo Finance', g);
-  }
-
-  /* ---------------- views ---------------- */
-  function viewFront(M) {
-    const top = topStories(), used = new Set();
-    if (!D.stories.length) { M.append(el('div', { class: 'empty', text: LIVE ? 'No stories in this file yet.' : 'Collecting the first news… this page fills itself in a minute.' })); return; }
-    M.append(el('section', { class: 'hero' }, briefBox(), globeBox(D.stories)));
-    const [a, b, c] = top; const rest = top.slice(3, 10); [a, b, c].forEach((x) => x && used.add(x.id));
-    const fr = el('section', { class: 'front' }); if (a) fr.append(card(a, 'lead')); if (b) fr.append(card(b)); if (c) fr.append(card(c));
-    fr.append(el('div', { class: 'side', style: { gridColumn: 'span 2' } }, el('div', { class: 'box also' }, el('h3', { text: 'Also today' }),
-      el('ol', null, rest.map((x) => { used.add(x.id); return el('li', { onclick: () => openStory(x.id) }, el('div', null, el('div', { class: 't', text: x.title }),
-        el('small', null, el('span', { class: 'dot', style: { '--c': col(x.cat) } }), SHORT[x.cat] + ' · ' + (x.n > 1 ? x.n + ' sources' : x.status === 'OFFICIAL' ? 'official' : '1 source') + ' · ' + ago(x.last)))); }))), numsBox()));
-    M.append(fr);
-    const W = D.stories.filter(watched).sort((a, b) => b.score - a.score).slice(0, 6);
-    if (W.length) M.append(sec('Your watch words', '#FFD166', (watch || []).join(' · '), el('div', { class: 'list cols' }, W.map(row)),
-      el('button', { class: 'more', onclick: editWatch, text: 'Edit words' })));
-    const dv = developing(D.stories); if (dv) M.append(dv);
-    const ld = loudness(), wh = where(D.stories); if (ld || wh) M.append(el('section', { class: 'sec two' }, ld || el('div'), wh || el('div')));
-    CATS.forEach((k) => { const L = storiesOf(k).filter((s) => !used.has(s.id)); if (!L.length) return;
-      const [x, y] = L, list = L.slice(2, 8);
-      M.append(sec(cname(k), col(k), `${storiesOf(k).length} stories · most important first`, list.length ? el('div', { class: 'secgrid' }, card(x, 'sm'), y ? card(y, 'sm') : el('div'), el('div', { class: 'list' }, list.map(row))) : el('div', { class: 'secgrid fewer' }, L.slice(0, 3).map((z) => card(z, 'sm'))),
-        el('button', { class: 'more', onclick: () => go(k), text: 'All ' + SHORT[k] + ' →' }))); });
-    const bd = board(); if (bd) M.append(bd);
-  }
-  function viewCat(M, k) {
-    const L = storiesOf(k);
-    if (!L.length) { M.append(sec(cname(k), col(k), '', el('div', { class: 'empty', text: 'No ' + SHORT[k] + ' stories in the last 24 hours yet.' }))); return; }
-    const g = el('section', { class: 'front' }); const [a, b, c] = L; if (a) g.append(card(a, 'lead')); if (b) g.append(card(b)); if (c) g.append(card(c));
-    const nx = L.slice(3, 7); g.append(el('div', { class: 'side', style: { gridColumn: 'span 2', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '18px' } }, nx.map((s) => card(s, 'sm'))));
-    M.append(sec(cname(k), col(k), `${L.length} stories in the last 24 hours · most important first`, g));
-    if (k === 'economy' || k === 'crypto') { const ks = k === 'crypto' ? ['btc', 'eth', 'sol', 'xrp'] : ['spx', 'ndx', 'gold', 'oil', 'dxy', 'tnx', 'vix', 'lkr'];
-      const ms = ks.map((x) => MK[x]).filter((m) => m && isNum(m.p)); if (ms.length) M.append(el('div', { class: 'board', style: { marginTop: '18px' } }, ms.map(numTile))); }
-    if (L.length > 7) M.append(sec('More ' + SHORT[k], col(k), '', el('div', { class: 'list cols' }, L.slice(7).map(row))));
-  }
-  function viewList(M, title, c, L, sub, extra) {
-    M.append(sec(title, c, sub, L.length ? el('div', { class: 'list cols' }, L.map(row)) : el('div', { class: 'empty', text: 'Nothing here yet.' }), extra));
-  }
-  function viewSaved(M) {
-    const L = Object.values(stars).sort((a, b) => b.saved - a.saved);
-    const copyAll = el('button', { class: 'more', onclick: () => copy(L), text: '⧉ Copy all' });
-    const wrap = el('div', { class: 'list cols' }, L.map((s) => { const live = BYID[s.id]; const r = row(live || s); r.append(el('div', { class: 'm' }, 'saved ' + ago(s.saved / 1000), ' · ',
-      el('a', { href: '#', onclick: (e) => { e.preventDefault(); e.stopPropagation(); delete stars[s.id]; S.set('stars', stars); render(); }, text: 'remove' }))); return r; }));
-    M.append(sec('Saved stories', '#FFD166', 'Kept on this device · ' + L.length, L.length ? wrap : el('div', { class: 'empty', text: 'Open any story and press ☆ Save to keep it here.' }), L.length ? copyAll : null));
-  }
-  function render() {
-    WRX = watchRx(); renderTicker(); renderNav(); renderBar(); renderBreaking();
-    const M = clear($('main')); if (GLOBE && !(view === 'front' && !query)) { GLOBE.stop(); GLOBE = null; }
-    if (query) { const q = query.toLowerCase(); const L = D.stories.filter((s) => (s.title + ' ' + (s.reports || []).map((r) => r.t + ' ' + r.o).join(' ') + ' ' + (s.places || []).map((p) => p.p).join(' ')).toLowerCase().includes(q)).sort((a, b) => b.score - a.score);
-      viewList(M, 'Search', '#C6FF3D', L, `${L.length} stories match “${query}”`); }
-    else if (view === 'front') viewFront(M);
-    else if (CATS.includes(view)) viewCat(M, view);
-    else if (view === 'saved') viewSaved(M);
-    else if (view === 'new') viewList(M, 'New since your last visit', '#C6FF3D', D.stories.filter(isNew).sort((a, b) => b.score - a.score), 'since ' + ago(prevVisit));
-    else { view = 'front'; viewFront(M); }
-    renderFoot();
-  }
-  function renderFoot() {
-    const f = D.feeds || {}, list = Object.entries(f.list || {});
-    const det = list.length ? el('details', null, el('summary', { text: `Sources: ${f.ok}/${f.total} reachable on the last update` }),
-      el('div', { class: 'fl' }, list.sort((a, b) => (a[1].ok === b[1].ok ? a[0].localeCompare(b[0]) : a[1].ok ? 1 : -1)).map(([n, h]) => el('span', { class: h.ok ? '' : 'bad', title: h.err || (h.n + ' headlines'), text: (h.ok ? '● ' : '○ ') + n + (h.ok ? ' · ' + h.n : ' · ' + (h.err || 'failed')) })))) : null;
-    clear($('foot')).append(
-      el('div', null, el('b', { text: 'How this page decides what matters. ' }), 'The same story from different newsrooms is grouped into one. ', el('b', { text: 'VERIFIED' }), ' = 2+ independent newsrooms · ', el('b', { text: 'OFFICIAL' }),
-        ' = a government body, central bank, regulator, UN agency or scientific agency · ', el('b', { text: '1 SOURCE' }), ' = not confirmed yet. Importance = how many newsrooms carry it + official confirmation + big-event words + how fresh it is. ',
-        'Only headlines and links are stored; read the full story at the source. Every picture on this page is drawn from data (globes, maps, charts), not news photos. ', det),
-      el('div', null, el('b', { text: 'The Daily Brief' }), el('br'), 'Your own news desk. Saved stories and watch words stay on this device.', el('br'),
-        el('a', { href: '#', style: { color: '#C6FF3D' }, onclick: (e) => { e.preventDefault(); editWatch(); }, text: 'Edit watch words' }), ' · ',
-        el('a', { href: '#', style: { color: '#C6FF3D' }, onclick: (e) => { e.preventDefault(); scrollTo({ top: 0 }); }, text: 'Back to top' })));
-  }
-
-  /* ---------------- drawer: one story, all its reports ---------------- */
-  function openDrawer(build) { const p = clear($('drPanel')); build(p); $('drawer').classList.add('open'); $('drawer').setAttribute('aria-hidden', 'false'); document.body.classList.add('lock'); p.scrollTop = 0; setTimeout(() => { const x = p.querySelector('.dr-x'); if (x) x.focus(); }, 50); }
-  function closeDrawer() { $('drawer').classList.remove('open'); $('drawer').setAttribute('aria-hidden', 'true'); document.body.classList.remove('lock'); if (location.hash.startsWith('#s=') || location.hash.startsWith('#p=')) history.replaceState(null, '', location.pathname + location.search); }
-  function openStory(id) {
-    const s = BYID[id] || stars[id]; if (!s) return;
-    history.replaceState(null, '', '#s=' + id);
-    openDrawer((p) => {
-      const c = col(s.cat), saved = !!stars[s.id];
-      const art = el('div', { class: 'dr-art' }, artFor(s, true)); p.append(art, el('button', { class: 'ib dr-x', onclick: closeDrawer, 'aria-label': 'Close', text: '✕' }));
-      const sure = s.status === 'OFFICIAL' ? `Comes from an official source (${s.orgs.filter((o) => /SEC|Fed|ECB|Bank|BLS|IMF|United Nations|NASA|WHO|USGS/i.test(o)).join(', ') || s.orgs[0]})` + (s.n > 1 ? ` and is also reported by ${s.n - 1} more.` : '.')
-        : s.status === 'VERIFIED' ? `Reported by ${s.n} independent newsrooms: ${s.orgs.join(', ')}.` : `Only ${s.orgs[0]} has reported this so far. Treat it as unconfirmed until others confirm it.`;
-      const rel = D.stories.filter((x) => x.id !== s.id && ((x.places || []).some((pp) => (s.places || []).some((q) => q.c === pp.c)) || (x.kw || []).some((k) => (s.kw || []).includes(k)))).sort((a, b) => b.score - a.score).slice(0, 5);
-      p.append(el('div', { class: 'dr-body', style: { '--c': c } },
-        el('div', { class: 'tags' }, el('span', { class: 'cat', style: { '--c': c }, text: cname(s.cat) }), badges(s)),
-        el('h2', { text: s.title }),
-        el('div', { class: 'dr-meta' }, 'First report ' + dshort(s.first) + ' ' + hm(s.first), '·', 'latest ' + hm(s.last) + ' (' + ago(s.last) + ')', '·', s.n + (s.n > 1 ? ' newsrooms' : ' newsroom')),
-        el('div', { class: 'dr-act' }, el('a', { class: 'btn pri', href: s.link, target: '_blank', rel: 'noopener noreferrer' }, 'Read the full story ↗'),
-          el('button', { class: 'btn' + (saved ? ' on' : ''), onclick: (e) => { if (stars[s.id]) delete stars[s.id]; else stars[s.id] = Object.assign({}, s, { saved: Date.now() }); S.set('stars', stars); e.currentTarget.classList.toggle('on'); e.currentTarget.textContent = stars[s.id] ? '★ Saved' : '☆ Save'; renderNav(); }, text: saved ? '★ Saved' : '☆ Save' }),
-          el('button', { class: 'btn', onclick: () => copy([s]), text: '⧉ Copy' }),
-          navigator.share ? el('button', { class: 'btn', onclick: () => navigator.share({ title: s.title, url: s.link }).catch(() => {}), text: '↗ Share' }) : null),
-        el('div', { class: 'dr-h', text: 'How sure is this?' }), el('div', { class: 'explain', text: sure }),
-        (s.places || []).length ? [el('div', { class: 'dr-h', text: 'Where' }), el('div', { class: 'chips' }, s.places.map((pp) => el('span', { text: pp.p })))] : null,
-        el('div', { class: 'dr-h', text: 'Every report, in order' }),
-        (s.reports || []).map((r) => el('div', { class: 'rep' }, el('time', { text: (new Date(r.ts * 1000).toDateString() !== new Date().toDateString() ? dshort(r.ts) + ' ' : '') + hm(r.ts) }),
-          el('div', null, el('b', { text: r.o }), el('a', { href: r.u, target: '_blank', rel: 'noopener noreferrer', text: r.t })))),
-        rel.length ? [el('div', { class: 'dr-h', text: 'Related today' }), el('div', { class: 'list' }, rel.map(row))] : null));
-    });
-  }
-  function openPlace(label) {
-    const L = D.stories.filter((s) => (s.places || []).some((p) => p.p === label)).sort((a, b) => b.score - a.score); if (!L.length) return;
-    history.replaceState(null, '', '#p=' + encodeURIComponent(label));
-    const fake = { id: 'place-' + label, cat: L[0].cat, title: label, places: L[0].places.filter((p) => p.p === label).concat(L[0].places.filter((p) => p.p !== label)), kw: [] };
-    openDrawer((p) => { p.append(el('div', { class: 'dr-art' }, artGlobe(fake, true)), el('button', { class: 'ib dr-x', onclick: closeDrawer, 'aria-label': 'Close', text: '✕' }),
-      el('div', { class: 'dr-body' }, el('span', { class: 'kicker', text: 'PLACE' }), el('h2', { text: label }), el('div', { class: 'dr-meta', text: L.length + (L.length > 1 ? ' stories' : ' story') + ' today' }),
-        el('div', { class: 'list', style: { marginTop: '14px' } }, L.map(row)))); });
-  }
-  function copy(L) {
-    const txt = L.map((s) => `${s.title}\n${s.status === 'VERIFIED' ? 'Verified by ' + s.n + ' newsrooms' : s.status === 'OFFICIAL' ? 'Official' : 'One source so far'}: ${(s.orgs || []).join(', ')}\n${s.link}`).join('\n\n');
-    (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject()).then(() => toast('Copied ' + L.length + (L.length > 1 ? ' stories' : ' story')), () => { prompt('Copy:', txt); });
-  }
-  function editWatch() {
-    openDrawer((p) => { const ta = el('textarea', { 'aria-label': 'Watch words, one per line' }); ta.value = (watch || []).join('\n');
-      p.append(el('button', { class: 'ib dr-x', onclick: closeDrawer, 'aria-label': 'Close', text: '✕' }), el('div', { class: 'dr-body watchbox', style: { marginTop: '60px' } },
-        el('span', { class: 'kicker', text: 'YOUR WATCH WORDS' }), el('h2', { text: 'What should jump out at you?' }),
-        el('p', { class: 'meta', text: 'One word or name per line. Stories that mention them get a gold ★ and their own row on the front page. Turn on 🔔 to get a pop-up when a new one arrives.' }), ta,
-        el('div', { class: 'dr-act' }, el('button', { class: 'btn pri', onclick: () => { watch = ta.value.split(/\n|,/).map((x) => x.trim()).filter(Boolean).slice(0, 40); S.set('watch', watch); closeDrawer(); render(); toast('Watch words saved'); }, text: 'Save' }),
-          el('button', { class: 'btn', onclick: closeDrawer, text: 'Cancel' })))); });
-  }
-
-  /* ---------------- navigation, refresh, alerts ---------------- */
-  function go(k) { view = k; query = ''; $('q').value = ''; S.set('view', k); render(); scrollTo({ top: 0, behavior: 'smooth' }); }
-  async function loadDay(day) {
-    if (!day || (LIVE && day === LIVE.date)) { DAY = null; D = prepare(LIVE); }
-    else { try { DAY = day; D = prepare(await getJSON('data/archive/' + day + '.json')); } catch (e) { toast('That day is not saved'); DAY = null; D = prepare(LIVE); } }
-    GROT.r = null; render();
-  }
-  $('prevDay').onclick = () => { const ref = DAY || LIVE.date, older = DAYS.filter((d) => d < ref); if (older.length) loadDay(older[0]); };
-  $('nextDay').onclick = () => { const newer = DAYS.filter((d) => d > DAY).sort(); loadDay(newer[0] && newer[0] < LIVE.date ? newer[0] : null); };
-  async function refreshNow() { try { await fetch('api/refresh', { method: 'POST' }); toast('Fetching the latest news…'); setTimeout(poll, 25000); } catch (e) { poll(); } }
-  async function poll() {
-    try { const d = await getJSON('data/today.json'); if (LIVE && d.updated === LIVE.updated) return;
-      const oldIds = new Set(LIVE ? LIVE.stories.map((s) => s.id) : []); LIVE = d;
-      if (!DAY) { const y = scrollY; D = prepare(LIVE); if (!$('drawer').classList.contains('open')) { render(); scrollTo(0, y); } else { renderTicker(); renderBar(); } }
-      if (oldIds.size) { WRX = watchRx(); const fresh = d.stories.filter((s) => !oldIds.has(s.id) && (s.breaking || watched(s)));
-        fresh.slice(0, 3).forEach((s) => { toast((s.breaking ? 'Breaking: ' : '★ ') + s.title.slice(0, 80));
-          if (alerts && 'Notification' in window && Notification.permission === 'granted') { try { const n = new Notification(s.breaking ? 'Breaking · The Daily Brief' : '★ Watch word · The Daily Brief', { body: s.title + '\n' + s.orgs.slice(0, 3).join(', '), icon: 'icon-192.png', tag: s.id }); n.onclick = () => { focus(); openStory(s.id); }; } catch (e) { /* */ } } }); }
-      getJSON('data/archive/index.json').then((x) => { DAYS = x.days || []; renderBar(); }).catch(() => {});
-    } catch (e) { /* offline: keep showing what we have */ }
-  }
-  $('bell').classList.toggle('on', alerts);
-  $('bell').onclick = async () => {
-    if (!alerts && 'Notification' in window && Notification.permission !== 'granted') { try { await Notification.requestPermission(); } catch (e) { /* */ } }
-    alerts = !alerts; S.set('alerts', alerts); $('bell').classList.toggle('on', alerts); toast(alerts ? 'Alerts on: breaking news and your watch words' : 'Alerts off');
-  };
-  $('watchBtn').onclick = editWatch;
-  $('home').onclick = (e) => { e.preventDefault(); if (DAY) loadDay(null); go('front'); };
-  $('newChip').onclick = () => go('new');
-  $('drShade').onclick = closeDrawer;
-  let qt = 0; $('q').addEventListener('input', (e) => { clearTimeout(qt); qt = setTimeout(() => { query = e.target.value.trim(); render(); }, 180); });
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { if ($('drawer').classList.contains('open')) closeDrawer(); else if (query) { query = ''; $('q').value = ''; render(); } }
-    if (e.key === '/' && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA') { e.preventDefault(); $('q').focus(); } });
-  function markVisit() { S.set('lastVisit', now()); }
-  setTimeout(markVisit, 20000); document.addEventListener('visibilitychange', () => { if (document.hidden) markVisit(); else poll(); });
-
   /* the map is simplified for speed: drop broken tiny rings and make every outline wind the way d3 expects */
   function fixShape(f) {
     const g = f.geometry; if (!g) return null;
@@ -546,7 +204,496 @@
     if (!polys.length) return null;
     return { type: 'Feature', id: f.id, properties: f.properties, geometry: { type: 'MultiPolygon', coordinates: polys } };
   }
-  /* ---------------- start ---------------- */
+  /* ================= topics ================= */
+  const CATS = ['world', 'war', 'economy', 'forex', 'commodities', 'energy', 'crypto', 'home', 'tech', 'science', 'sport'];
+  const CAT = { world: 'World', war: 'War & conflict', economy: 'Economy & stocks', forex: 'Forex', commodities: 'Commodities', energy: 'Energy',
+    crypto: 'Crypto', home: 'Home', tech: 'Tech & AI', science: 'Science & health', sport: 'Sport' };
+  const SHORT = { world: 'World', war: 'War', economy: 'Economy', forex: 'Forex', commodities: 'Commodities', energy: 'Energy', crypto: 'Crypto', home: 'Home',
+    tech: 'Tech & AI', science: 'Science', sport: 'Sport' };
+  const ICON = { world: '◍', war: '⚑', economy: '▤', forex: '⇄', commodities: '◆', energy: '⚡', crypto: '₿', home: '⌂', tech: '⌘', science: '✚', sport: '◎' };
+  /* colours for drawn pictures (always on dark backgrounds) */
+  const DARK = { world: '#7FB2FF', war: '#FF6B5A', economy: '#A5B4FC', forex: '#5EEAD4', commodities: '#FFD166', energy: '#FF9F43', crypto: '#C6FF3D',
+    home: '#FF8AD8', tech: '#C59BFF', science: '#67E8F9', sport: '#86EFAC' };
+  const col = (c) => DARK[c] || DARK.world;
+  const cv = (c) => 'var(--k-' + (DARK[c] ? c : 'world') + ')';
+  const cname = (c) => CAT[c] || 'World';
+  const TOP_CAP = { world: 3, war: 3, economy: 3, forex: 2, commodities: 2, energy: 2, crypto: 2, home: 2, tech: 2, science: 1, sport: 1 };
+  const MKT = { crypto: ['btc', 'eth', 'sol', 'xrp'], forex: ['dxy', 'eur', 'gbp', 'jpy', 'cny', 'inr', 'lkr'], commodities: ['gold', 'silver', 'copper', 'wheat'],
+    energy: ['oil', 'wti', 'gas'], economy: ['spx', 'ndx', 'dji', 'tnx', 'vix'] };
+  const MKT_NAME = { crypto: 'Crypto', forex: 'Forex', commodities: 'Commodities', energy: 'Energy', economy: 'Stocks & rates' };
+  const DEFAULT_MK = { crypto: 'btc', economy: 'spx', energy: 'oil', commodities: 'gold', forex: 'dxy' };
+
+  /* sub-topics inside each chapter */
+  const ME = new Set(['Israel', 'Palestine', 'Lebanon', 'Syria', 'Jordan', 'Iraq', 'Iran', 'Yemen', 'Saudi Arabia', 'United Arab Emirates', 'Qatar', 'Oman', 'Kuwait', 'Bahrain', 'Turkey', 'Egypt']);
+  function region(s) {
+    const p = (s.places || [])[0]; if (!p) return 'Global';
+    if (ME.has(p.c)) return 'Middle East';
+    const ll = p.pt || CENT[p.c]; if (!ll) return 'Global'; const [x, y] = ll;
+    if (x < -30) return 'Americas'; if (y > 35 && x < 60) return 'Europe'; if (x > -20 && x < 52 && y < 37) return 'Africa'; return 'Asia & Pacific';
+  }
+  const has = (s, c) => (s.places || []).some((p) => c.includes(p.c));
+  const SUB = {
+    war: [['Israel, Gaza & Lebanon', (s) => has(s, ['Israel', 'Palestine', 'Lebanon', 'Syria'])], ['Iran, Yemen & the Gulf', (s) => has(s, ['Iran', 'Yemen', 'Saudi Arabia', 'United Arab Emirates', 'Qatar', 'Oman', 'Iraq'])],
+      ['Russia & Ukraine', (s) => has(s, ['Russia', 'Ukraine', 'Belarus'])], ['Africa', (s) => region(s) === 'Africa'], ['Asia', (s) => region(s) === 'Asia & Pacific']],
+    economy: [['Central banks & interest rates', /\bfed\b|federal reserve|\becb\b|central bank|rate cut|rate hike|interest rate|powell|lagarde|\bboj\b|bank of england|monetary/i],
+      ['Inflation, jobs & growth', /inflation|\bcpi\b|\bppi\b|jobs|payroll|unemployment|wages|\bgdp\b|recession|growth|economy grew|shrank/i],
+      ['Stocks & companies', /stocks?|shares|s&p|nasdaq|\bdow\b|wall street|earnings|\bipo\b|profit|revenue/i], ['Trade & tariffs', /tariff|trade|export|import|sanction/i],
+      ['Debt, bonds & budgets', /debt|deficit|budget|bonds?|yields?|treasur/i]],
+    forex: [['US dollar', /dollar|\bdxy\b|greenback/i], ['Euro & pound', /\beuro\b|\becb\b|sterling|pound|\bgbp\b|\beur\b/i], ['Asian currencies', /\byen\b|yuan|renminbi|rupee|\bwon\b|rupiah|ringgit|baht|\bboj\b/i],
+      ['Emerging markets', /lira|peso|\brand\b|\breal\b|naira|ruble|rouble|emerging|devaluation|\bpeg\b/i]],
+    commodities: [['Gold & silver', /gold|silver|platinum|palladium|bullion/i], ['Metals & mining', /copper|iron ore|alumin|nickel|lithium|zinc|cobalt|rare earth|steel|mining|miner/i],
+      ['Farm & food', /wheat|corn|soy|coffee|cocoa|sugar|cotton|palm oil|rice|grain|food/i]],
+    energy: [['Oil', /\boil\b|crude|brent|\bwti\b|opec|barrel|tanker|refin|shale|hormuz/i], ['Gas & LNG', /\bgas\b|\blng\b/i], ['Power & renewables', /power|electric|grid|solar|wind|renewable|nuclear|coal|batter/i]],
+    crypto: [['Bitcoin', /bitcoin|\bbtc\b/i], ['ETFs, rules & regulators', /\betfs?\b|\bsec\b|regulat|\blaws?\b|\bbill\b|licen|cftc|\bban\b|\btax/i],
+      ['Ethereum & altcoins', /ether|\beth\b|solana|\bxrp\b|ripple|cardano|token|altcoin|memecoin|dogecoin/i], ['Hacks & scams', /hack|exploit|stolen|scam|fraud|breach|drain/i],
+      ['Companies & stablecoins', /coinbase|binance|tether|stablecoin|exchange|strategy|blackrock|circle/i]],
+    tech: [['AI', /\bai\b|artificial intelligence|openai|anthropic|chatgpt|gemini|llm|\bmodels?\b/i], ['Big tech', /apple|google|microsoft|\bmeta\b|amazon|nvidia|tesla|samsung/i],
+      ['Cyber & security', /cyber|hack|breach|ransom|malware/i], ['Space', /space|rocket|satellite|spacex|nasa/i], ['Chips & gadgets', /chip|semiconductor|phone|iphone|device|laptop/i]],
+    science: [['Health', /health|virus|disease|vaccine|cancer|hospital|\bwho\b|outbreak|dengue|drug|patients?/i], ['Climate & environment', /climate|cop\d|emission|warming|flood|heat|storm|wildfire|environment|species|ocean/i],
+      ['Space', /space|nasa|moon|mars|planet|rocket|asteroid|artemis|telescope/i]],
+    sport: [['Cricket', /cricket|\bt20\b|\bodi\b|test match|wicket|\bipl\b/i], ['Football', /football|soccer|premier league|champions league|fifa|uefa|la liga|arsenal|chelsea|madrid/i],
+      ['Formula 1 & motor', /formula|\bf1\b|grand prix|motogp/i], ['Tennis', /tennis|wimbledon|\batp\b|\bwta\b/i]],
+    home: [['Sri Lanka', (s) => has(s, ['Sri Lanka']) || /sri lanka|colombo|lankan|cbsl/i.test(s.title)], ['UAE', (s) => has(s, ['United Arab Emirates']) || /\buae\b|dubai|abu dhabi|emirat/i.test(s.title)]],
+  };
+  const OTHER = { war: 'Other conflicts', economy: 'More business', forex: 'More currency news', commodities: 'More commodities', energy: 'More energy', crypto: 'More crypto',
+    tech: 'More tech', science: 'Discoveries', sport: 'More sport', home: 'Gulf & region' };
+  function subOf(s, c) {
+    if (c === 'world') return region(s);
+    const txt = s.title + ' ' + (s.dek || '');
+    for (const [name, t] of SUB[c] || []) { if (typeof t === 'function' ? t(s) : t.test(txt)) return name; }
+    return OTHER[c] || 'More';
+  }
+
+  /* ================= state ================= */
+  let LIVE = null, D = null, DAYS = [], DAY = null, MK = {}, BYID = {};
+  let view = 'front', query = '';
+  let stars = S.get('stars', {}), watch = S.get('watch', null), alerts = S.get('alerts', false), seen = new Set(S.get('seen', []));
+  let since = S.get('lastVisit', 0), snapPrev = S.get('snap', null), hiddenAt = 0;
+  let TOPO = null, FEATS = [], CENT = {}, MESH = null; const GRAT = d3.geoGraticule10();
+  const CENT_FIX = { 'United States of America': [-98, 39], France: [2.3, 46.6], Russia: [40, 56], Norway: [9, 61], Canada: [-98, 57], Netherlands: [5.3, 52.2], Denmark: [9.5, 56], Chile: [-71, -34], 'New Zealand': [172, -41], Indonesia: [113, -2], Malaysia: [102, 4] };
+  let WRX = null;
+  const sinceMode = () => !DAY && since > 0 && now() - since < 36 * 3600;
+  const isNew = (s) => sinceMode() && s.first > since;
+  const isUpd = (s) => sinceMode() && !isNew(s) && s.n >= 2 && (s.reports || []).some((r) => r.ts > since);
+  const newReports = (s) => (s.reports || []).filter((r) => r.ts > since).length;
+  const watched = (s) => !!WRX && (WRX.test(s.title) || WRX.test(s.dek || ''));
+  const quality = (s) => s.n >= 2 || s.status === 'OFFICIAL';
+  const imp = (s) => s.peak || s.score;
+  function markSeen(id) { if (seen.has(id)) return; seen.add(id); S.set('seen', [...seen].slice(-800)); }
+
+  /* ================= numbers ================= */
+  function fmtP(m, p) {
+    p = isNum(p) ? p : m.p; if (!isNum(p)) return '—'; const k = m.k;
+    if (k === 'tnx') return p.toFixed(2) + '%';
+    if (['spx', 'ndx', 'dji'].includes(k)) return p.toLocaleString(undefined, { maximumFractionDigits: 0 });
+    if (['eur', 'gbp'].includes(k)) return p.toFixed(4); if (k === 'xrp') return '$' + p.toFixed(3);
+    if (['lkr', 'dxy', 'vix', 'jpy', 'cny', 'inr'].includes(k)) return p.toFixed(2);
+    if (k === 'copper' || k === 'gas') return '$' + p.toFixed(3); if (k === 'wheat') return p.toFixed(1) + '¢';
+    return '$' + p.toLocaleString(undefined, { maximumFractionDigits: p >= 1000 ? 0 : 2 });
+  }
+  const fmtC = (c) => isNum(c) ? (c >= 0 ? '+' : '−') + Math.abs(c).toFixed(2) + '%' : '';
+  const sinceChg = (m) => { if (!snapPrev || !snapPrev.p || !isNum(snapPrev.p[m.k]) || !isNum(m.p)) return null; return (m.p / snapPrev.p[m.k] - 1) * 100; };
+  function saveSnap() { const p = {}; (LIVE && LIVE.markets || []).forEach((m) => { if (isNum(m.p)) p[m.k] = m.p; }); if (Object.keys(p).length) S.set('snap', { t: now(), p }); }
+
+  /* ================= pictures: which one a story gets ================= */
+  function marketArt(s) {
+    const m = marketFor(s); if (m && ['economy', 'crypto', 'forex', 'commodities', 'energy'].includes(s.cat)) return m;
+    if (s.places && s.places.length && FEATS.length && !['crypto', 'forex', 'commodities', 'energy'].includes(s.cat)) return null;
+    const d = MK[DEFAULT_MK[s.cat]]; return d && (d.spark || []).length > 3 ? d : null;
+  }
+  function artFor(s, big) {
+    const m = marketArt(s); if (m) return artMarket(s, m);
+    if (s.places && s.places.length && FEATS.length && !['sport', 'tech', 'science'].includes(s.cat)) return artGlobe(s, big);
+    if (s.places && s.places.length && FEATS.length && s.cat === 'science' && /quake|storm|flood|fire|hurricane|cyclone/i.test(s.title)) return artGlobe(s, big);
+    if (['tech', 'science', 'sport'].includes(s.cat)) return artPattern(s);
+    return FEATS.length ? artFlat(s) : svg('0 0 600 600', '<rect width="600" height="600" fill="#101014"/>');
+  }
+
+  /* ================= data ================= */
+  async function getJSON(u) { const r = await fetch(u + (u.includes('?') ? '&' : '?') + 't=' + Date.now(), { cache: 'no-store' }); if (!r.ok) throw new Error(r.status); return r.json(); }
+  function prepare(d) {
+    d.stories = d.stories || []; BYID = {}; d.stories.forEach((s) => { s.cat = CAT[s.cat] ? s.cat : 'world'; s.also = s.also || []; BYID[s.id] = s; });
+    if (!d.top || !d.top.length) { const per = {}; d.top = [];
+      [...d.stories].filter(quality).sort((a, b) => imp(b) - imp(a)).forEach((s) => { if (d.top.length >= 12 || (per[s.cat] || 0) >= (TOP_CAP[s.cat] || 2)) return; d.top.push(s.id); per[s.cat] = (per[s.cat] || 0) + 1; }); }
+    MK = {}; (d.markets || []).forEach((m) => { MK[m.k] = m; });
+    CAT.home = d.home_title || 'Home'; SHORT.home = d.home_title || 'Home';
+    if (watch == null) watch = d.watchlist_default || [];
+    const w = (watch || []).map((x) => x.trim()).filter(Boolean);
+    WRX = w.length ? new RegExp('\\b(' + w.map((x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')', 'i') : null;
+    return d;
+  }
+  const inCat = (s, c) => c === 'home' ? (s.cat === 'home' || s.home) : s.cat === c;
+  const storiesOf = (c) => D.stories.filter((s) => inCat(s, c)).sort((a, b) => imp(b) - imp(a));
+  const alsoOf = (c) => D.stories.filter((s) => !inCat(s, c) && s.also.includes(c) && quality(s)).sort((a, b) => imp(b) - imp(a));
+  const chapterOrder = () => CATS.filter((c) => storiesOf(c).length).sort((a, b) => {
+    const A = storiesOf(a).filter(quality)[0], B = storiesOf(b).filter(quality)[0]; return (B ? imp(B) : -99) - (A ? imp(A) : -99); });
+
+  /* ================= small pieces ================= */
+  function kicker(s, opt) {
+    opt = opt || {};
+    const k = el('div', { class: 'kick' });
+    if (!opt.noCat) k.append(el('span', { class: 'kc', style: { '--c': cv(s.cat) } }, el('i'), SHORT[s.cat]));
+    if (s.breaking && !DAY) k.append(el('span', { class: 'tag brk', text: 'Breaking' }));
+    if (isNew(s)) k.append(el('span', { class: 'tag new', text: 'New' }));
+    else if (isUpd(s)) k.append(el('span', { class: 'tag upd', text: 'Updated · ' + newReports(s) + ' new' }));
+    if (watched(s)) k.append(el('span', { class: 'tag watch', text: '★ Watch' }));
+    k.append(el('span', { class: 'st ' + (s.status === 'VERIFIED' ? 'v' : s.status === 'OFFICIAL' ? 'o' : 's'), title: s.status === '1 SOURCE' ? 'Only one outlet so far' : '',
+      text: s.status === 'VERIFIED' ? '✓ ' + s.n + ' sources' : s.status === 'OFFICIAL' ? '◆ Official' : '1 source' }));
+    k.append(el('span', { class: 'tm', text: ago(s.last) }));
+    if (s.developing && !opt.light) k.append(el('span', { class: 'tag dev', text: 'Developing · day ' + Math.max(2, Math.ceil((s.last - s.first) / 86400)) }));
+    return k;
+  }
+  const srcLine = (s) => el('div', { class: 'srcs', text: (s.orgs || []).slice(0, 4).join(' · ') + (s.orgs.length > 4 ? ' +' + (s.orgs.length - 4) : '') });
+  function item(s, opt) {
+    opt = opt || {};
+    const a = el('article', { 'data-sid': s.id, class: 'item' + (seen.has(s.id) ? ' read' : '') + (opt.num ? ' numd' : '') + (opt.thumb ? ' has-th' : ''), tabindex: 0, role: 'button',
+      onclick: () => openStory(s.id), onkeydown: (e) => { if (e.key === 'Enter') openStory(s.id); } });
+    if (opt.num) a.append(el('span', { class: 'num', style: { '--c': cv(s.cat) }, text: opt.num }));
+    a.append(el('div', { class: 'body' }, kicker(s, opt), el('h3', { text: s.title }), s.dek && !opt.noDek ? el('p', { class: 'dek', text: s.dek }) : null, opt.noSrc ? null : srcLine(s)));
+    if (opt.thumb) { const t = el('div', { class: 'th' }); t.append(artBox(s)); a.append(t); }
+    return a;
+  }
+  function lead(s) {
+    const a = el('article', { class: 'lead', tabindex: 0, role: 'button', onclick: () => openStory(s.id), onkeydown: (e) => { if (e.key === 'Enter') openStory(s.id); } });
+    const b = el('div', { class: 'banner' }); b.append(artBox(s, true));
+    const m = marketArt(s); if (m) b.append(el('span', { class: 'mchip' }, m.name + ' ', el('b', { text: fmtP(m) }), ' ', el('i', { class: (m.chg || 0) >= 0 ? 'u' : 'd', text: fmtC(m.chg) })));
+    a.append(b, el('div', { class: 'body' }, kicker(s), el('h2', { text: s.title }), s.dek ? el('p', { class: 'dek', text: s.dek }) : null, srcLine(s)));
+    return a;
+  }
+  function sec(title, opt, ...kids) {
+    opt = opt || {};
+    return el('section', { class: 'sec ' + (opt.cls || ''), id: opt.id || null, style: opt.c ? { '--c': opt.c } : null },
+      el('div', { class: 'sec-h' }, el('h2', { text: title }), opt.sub ? el('span', { class: 'sub', text: opt.sub }) : null, opt.more || null), kids);
+  }
+  function tile(m, big, mode) {
+    const sc = sinceChg(m), useSince = mode === 'since' && sc !== null, up = ((useSince ? sc : m.chg) || 0) >= 0, d = sparkPath(m.spark, 0, 120, 3, 27);
+    const t = el('div', { class: 'tile' + (big ? ' big' : ''), title: m.src ? 'Source: ' + m.src : '' }, el('div', { class: 'tn', text: m.name }), el('div', { class: 'tv', text: fmtP(m) }),
+      el('div', { class: 'tc ' + (up ? 'u' : 'd'), text: m.err ? 'not available' : useSince ? fmtC(sc) + ' since visit' : fmtC(m.chg) + ' today' }),
+      !mode && sc !== null && Math.abs(sc) >= 0.01 && sinceMode() ? el('div', { class: 'ts ' + (sc >= 0 ? 'u' : 'd'), text: fmtC(sc) + ' since visit' }) : null);
+    if (d) { const g = svg('0 0 120 30', `<path d="${d}" fill="none" stroke="${up ? '#22C55E' : '#EF4444'}" stroke-width="1.6" stroke-linejoin="round"/>`); g.setAttribute('preserveAspectRatio', 'none'); g.classList.add('tsp'); t.append(g); }
+    return t;
+  }
+  function mrow(m) {
+    const up = (m.chg || 0) >= 0, d = sparkPath(m.spark, 0, 60, 2, 18);
+    const g = d ? svg('0 0 60 20', `<path d="${d}" fill="none" stroke="${up ? '#22C55E' : '#EF4444'}" stroke-width="1.4"/>`) : el('span');
+    if (d) g.setAttribute('preserveAspectRatio', 'none');
+    return el('div', { class: 'mrow', title: m.src || '' }, el('span', { class: 'mn', text: m.name }), g, el('span', { class: 'mv', text: fmtP(m) }), el('span', { class: 'mc ' + (up ? 'u' : 'd'), text: fmtC(m.chg) }));
+  }
+  function fngGauge(f) {
+    const a = Math.PI * (1 - f.v / 100), x = 60 + Math.cos(a) * 46, y = 62 - Math.sin(a) * 46;
+    const c = f.v < 25 ? '#EF4444' : f.v < 45 ? '#F97316' : f.v < 56 ? '#EAB308' : f.v < 76 ? '#84CC16' : '#22C55E';
+    return el('div', { class: 'gauge' }, svg('0 0 120 70', `<defs><linearGradient id="fg${++gid}"><stop offset="0" stop-color="#EF4444"/><stop offset=".5" stop-color="#EAB308"/><stop offset="1" stop-color="#22C55E"/></linearGradient></defs>
+      <path d="M14 62 A46 46 0 0 1 106 62" fill="none" stroke="url(#fg${gid})" stroke-width="10" stroke-linecap="round"/><line x1="60" y1="62" x2="${x}" y2="${y}" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><circle cx="60" cy="62" r="5" fill="currentColor"/>`),
+      el('div', null, el('div', { class: 'gv', style: { color: c }, text: f.v }), el('div', { class: 'gl', text: f.label }), el('small', { text: 'Crypto Fear & Greed' })));
+  }
+
+  /* ================= right rail ================= */
+  function rail(focus) {
+    const r = el('aside', { class: 'rail' });
+    const groups = focus && MKT[focus] ? [focus] : ['crypto', 'forex', 'commodities', 'energy', 'economy'];
+    const box = el('div', { class: 'card mk' }, el('h4', { text: focus && MKT[focus] ? MKT_NAME[focus] + ' now' : 'Markets now' }));
+    groups.forEach((g) => { const L = MKT[g].map((k) => MK[k]).filter((m) => m && isNum(m.p)); if (!L.length) return; if (groups.length > 1) box.append(el('div', { class: 'mg', text: MKT_NAME[g] })); L.forEach((m) => box.append(mrow(m))); });
+    if (D.fng && (!focus || focus === 'crypto')) box.append(fngGauge(D.fng));
+    box.append(el('div', { class: 'fine', text: 'Change on the day · for the big picture, not trading' }));
+    r.append(box);
+    const g = el('div', { class: 'card globe-box' }, el('h4', { text: 'Where it\'s happening' }), el('div', { class: 'fine', text: 'Drag to turn · tap a dot' }));
+    r.append(g);
+    const list = focus ? storiesOf(focus) : D.stories.filter(quality);
+    requestAnimationFrame(() => { if (FEATS.length && list.some((s) => (s.places || []).length)) mountGlobe(g, list); else g.remove(); });
+    const dv = D.stories.filter((s) => s.developing && (!focus || inCat(s, focus))).sort((a, b) => imp(b) - imp(a)).slice(0, 5);
+    if (dv.length) r.append(el('div', { class: 'card dv' }, el('h4', { text: 'Developing' }), dv.map((s) => {
+      const span = Math.max(1, s.last - s.first), tl = el('div', { class: 'tl' });
+      (s.reports || []).forEach((x) => tl.append(el('i', { style: { left: ((x.ts - s.first) / span * 100).toFixed(1) + '%', '--c': cv(s.cat) } })));
+      return el('div', { class: 'dvi', onclick: () => openStory(s.id) }, el('div', { class: 'dvt', text: s.title }), tl, el('div', { class: 'fine', text: 'since ' + dshort(s.first) + ' · ' + (s.reports || []).length + ' reports' }));
+    })));
+    return r;
+  }
+
+  /* ================= the overview page ================= */
+  function greet() { const h = new Date().getHours(); return h < 5 ? 'Good night' : h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'; }
+  function viewHome(M) {
+    const content = el('div', { class: 'col' }); M.append(el('div', { class: 'grid' }, content, rail()));
+    const q = D.stories.filter(quality);
+    if (!D.stories.length) { content.append(el('div', { class: 'empty', text: LIVE ? 'No stories yet.' : 'Collecting the first news… this page fills itself in a minute.' })); return; }
+    /* hello */
+    const nNew = D.stories.filter((s) => isNew(s) && quality(s)).length, nUpd = D.stories.filter(isUpd).length, nBrk = DAY ? 0 : D.stories.filter((s) => s.breaking).length;
+    const moves = (D.markets || []).filter((m) => isNum(m.p) && isNum(m.chg)).map((m) => ({ m, c: sinceMode() && isNum(sinceChg(m)) ? sinceChg(m) : m.chg }))
+      .sort((a, b) => Math.abs(b.c) - Math.abs(a.c)).slice(0, 4);
+    const hello = el('section', { class: 'hello' },
+      el('div', { class: 'hi' }, DAY ? 'From the archive' : greet() + '.'),
+      el('p', { class: 'lede', text: DAY ? 'The biggest stories of ' + new Date(DAY + 'T12:00:00').toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' }) + '.'
+        : sinceMode() ? `Since you were last here ${ago(since).replace(' ago', '')} ago: ${nNew} new ${nNew === 1 ? 'story' : 'stories'} worth knowing${nUpd ? ', ' + nUpd + ' updated' : ''}${nBrk ? ', ' + nBrk + ' breaking' : ''}.`
+          : `Here is the day so far: ${q.length} stories confirmed by two or more newsrooms or by official sources.` }),
+      el('div', { class: 'hello-act' }, el('button', { class: 'btn pri big', onclick: () => openBrief() }, '▶  Play the 5-minute brief'),
+        el('span', { class: 'fine', text: (D.feeds ? D.feeds.ok + ' of ' + D.feeds.total + ' sources · ' : '') + 'updated ' + (D.updated ? ago(D.updated) : '—') })));
+    if (moves.length) hello.append(el('div', { class: 'moves' }, el('div', { class: 'mg', text: sinceMode() && snapPrev ? 'Biggest moves since you left' : 'Biggest moves today' }),
+      el('div', { class: 'tiles' }, moves.map(({ m }) => tile(m, false, sinceMode() && snapPrev ? 'since' : 'today')))));
+    content.append(hello);
+    /* breaking */
+    if (!DAY) D.stories.filter((s) => s.breaking).sort((a, b) => b.n - a.n).slice(0, 2).forEach((s) => content.append(el('div', { class: 'breaking', onclick: () => openStory(s.id) },
+      el('span', { class: 'bl', text: 'Breaking' }), el('span', { class: 'bt', text: s.title }), el('span', { class: 'fine', text: s.n + ' newsrooms · ' + ago(s.first) }))));
+    /* since you were away */
+    const shown = new Set();
+    if (sinceMode()) {
+      const L = D.stories.filter((s) => (isNew(s) && (quality(s) || watched(s) || s.home)) || isUpd(s)).sort((a, b) => imp(b) - imp(a)).slice(0, 8);
+      if (L.length) { L.forEach((s) => shown.add(s.id)); content.append(sec('While you were away', { sub: 'New and updated, most important first', c: 'var(--accent)' }, el('div', { class: 'list' }, L.map((s) => item(s, { thumb: true }))))); }
+    }
+    /* top stories */
+    const top = D.top.map((id) => BYID[id]).filter((s) => s && !shown.has(s.id)).slice(0, 7);
+    if (top.length) { top.forEach((s) => shown.add(s.id)); content.append(sec(DAY ? 'Top stories of the day' : 'Today\'s top stories', { sub: 'The day in order of importance' },
+      lead(top[0]), el('div', { class: 'list' }, top.slice(1).map((s, i) => item(s, { num: i + 2, thumb: false }))))); }
+    /* every area */
+    const cards = chapterOrder().map((c) => {
+      const L = storiesOf(c), Q = L.filter(quality), pick = (Q.length ? Q : L).slice(0, 3), ms = (MKT[c] || []).map((k) => MK[k]).filter((m) => m && isNum(m.p)).slice(0, 3);
+      return el('div', { class: 'area', style: { '--c': cv(c) }, role: 'button', tabindex: 0, onclick: () => go(c), onkeydown: (e) => { if (e.key === 'Enter') go(c); } },
+        el('div', { class: 'ah' }, el('span', { class: 'ai', text: ICON[c] }), el('b', { text: cname(c) }), el('span', { class: 'an', text: L.length })),
+        ms.length ? el('div', { class: 'am' }, ms.map((m) => el('span', null, m.name.replace(' oil', '').replace(' index', ''), ' ', el('b', { text: fmtP(m) }), ' ', el('i', { class: (m.chg || 0) >= 0 ? 'u' : 'd', text: fmtC(m.chg) })))) : null,
+        el('ul', null, pick.map((s) => el('li', { class: seen.has(s.id) ? 'read' : '' }, s.title))), el('span', { class: 'ago', text: 'Open ' + SHORT[c] + ' →' }));
+    });
+    content.append(sec('Every area at a glance', { sub: 'Tap an area to read it' }, el('div', { class: 'areas' }, cards)));
+    /* watch words */
+    const W = D.stories.filter((s) => watched(s) && !shown.has(s.id)).sort((a, b) => imp(b) - imp(a)).slice(0, 6);
+    if (W.length) content.append(sec('Your watch words', { sub: (watch || []).join(' · '), more: el('button', { class: 'lnk', onclick: editWatch, text: 'Edit' }) }, el('div', { class: 'list' }, W.map((s) => item(s)))));
+  }
+
+  /* ================= a chapter ================= */
+  function viewCat(M, c) {
+    const content = el('div', { class: 'col' }); M.append(el('div', { class: 'grid' }, content, rail(c)));
+    const L = storiesOf(c), Q = L.filter(quality), single = L.filter((s) => !quality(s)), A = alsoOf(c);
+    const head = el('header', { class: 'ch', style: { '--c': cv(c) } }, el('div', { class: 'chk', text: ICON[c] + '  Chapter' }), el('h1', { text: cname(c) }),
+      el('p', { class: 'lede', text: L.length ? `${Q.length} confirmed ${Q.length === 1 ? 'story' : 'stories'}${single.length ? ' and ' + single.length + ' single-source headlines' : ''} in the last 24 hours.` : 'Nothing in the last 24 hours yet.' }));
+    const ms = (MKT[c] || []).map((k) => MK[k]).filter((m) => m && isNum(m.p));
+    if (ms.length) head.append(el('div', { class: 'tiles' }, ms.map((m) => tile(m, true))));
+    content.append(head);
+    if (!L.length) return;
+    const main = Q.length ? Q : L.slice(0, 6), first = main[0];
+    content.append(lead(first));
+    const groups = {}; main.slice(1).forEach((s) => { const g = subOf(s, c); (groups[g] = groups[g] || []).push(s); });
+    Object.entries(groups).sort((a, b) => imp(b[1][0]) - imp(a[1][0])).forEach(([g, list]) =>
+      content.append(sec(g, { cls: 'sub-sec', c: cv(c) }, el('div', { class: 'list' }, list.map((s) => item(s, { noCat: true, thumb: list.length < 4 && s === list[0] }))))));
+    if (A.length) content.append(sec('Also moving ' + SHORT[c].toLowerCase(), { cls: 'sub-sec', sub: 'From other chapters', c: cv(c) }, el('div', { class: 'list' }, A.slice(0, 5).map((s) => item(s, { noDek: true })))));
+    const rest = Q.length ? single : L.slice(6);
+    if (rest.length) content.append(el('details', { class: 'more' }, el('summary', null, `More headlines (${rest.length}) · reported by one outlet so far`),
+      el('div', { class: 'list tight' }, rest.slice(0, 40).map((s) => item(s, { noCat: true, noDek: true })))));
+  }
+  function viewList(M, title, L, sub, extra) {
+    const content = el('div', { class: 'col' }); M.append(el('div', { class: 'grid' }, content, rail()));
+    content.append(sec(title, { sub, more: extra }, L.length ? el('div', { class: 'list' }, L.map((s) => item(s))) : el('div', { class: 'empty', text: 'Nothing here yet.' })));
+  }
+  function viewSaved(M) {
+    const L = Object.values(stars).sort((a, b) => b.saved - a.saved).map((s) => BYID[s.id] || s);
+    viewList(M, 'Saved stories', L, 'Kept on this device · ' + L.length, L.length ? el('button', { class: 'lnk', onclick: () => copy(L), text: '⧉ Copy all' }) : null);
+  }
+
+  /* ================= header + chapters bar ================= */
+  function renderChapters() {
+    const nav = clear($('nav'));
+    const b = (k, label, c, n) => el('button', { class: view === k && !query ? 'on' : '', style: c ? { '--c': c } : null, onclick: () => go(k) }, c ? el('i') : null, label, n ? el('small', { text: n }) : null);
+    nav.append(b('front', 'Overview', null));
+    CATS.forEach((c) => { const n = storiesOf(c).filter(quality).length; if (storiesOf(c).length) nav.append(b(c, SHORT[c], cv(c), n || null)); });
+    const ns = Object.keys(stars).length; nav.append(b('saved', '☆ Saved', null, ns || null));
+  }
+  function renderTop() {
+    const t = DAY ? new Date(DAY + 'T12:00:00') : new Date();
+    clear($('dateTxt')).append(t.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }), DAY ? el('em', { text: ' · archive' }) : el('em', { class: 'live', text: ' · live' }));
+    const ref = DAY || (LIVE && LIVE.date); $('prevDay').disabled = !DAYS.some((d) => d < ref); $('nextDay').disabled = !DAY;
+    const items = ['btc', 'eth', 'spx', 'gold', 'oil', 'gas', 'dxy', 'eur', 'jpy', 'lkr', 'tnx', 'vix', 'silver', 'copper', 'sol'].map((k) => MK[k]).filter((m) => m && isNum(m.p))
+      .map((m) => el('span', null, m.name, el('em', { text: fmtP(m) }), el('b', { class: (m.chg || 0) >= 0 ? 'u' : 'd', text: fmtC(m.chg) })));
+    if (!items.length) items.push(el('span', null, 'Prices appear after the first update'));
+    clear($('tick')).append(...items, ...items.map((n) => n.cloneNode(true)));
+  }
+  function renderFoot() {
+    const f = D.feeds || {}, list = Object.entries(f.list || {});
+    clear($('foot')).append(el('div', null, el('b', { text: 'How it works. ' }), 'The same story from different newsrooms is grouped into one. ', el('b', { text: '✓ sources' }), ' = confirmed by 2 or more independent newsrooms · ',
+      el('b', { text: '◆ Official' }), ' = a government body, central bank, regulator or agency · ', el('b', { text: '1 source' }), ' = not confirmed yet (kept under "More headlines"). ',
+      'Headlines and the short teaser come from each outlet\'s own feed; tap through to read the full story there. Pictures are drawn from data (globes, maps, charts), not news photos.',
+      list.length ? el('details', null, el('summary', { text: `Sources: ${f.ok} of ${f.total} reachable on the last update` }),
+        el('div', { class: 'fl' }, list.sort((a, b) => (a[1].ok === b[1].ok ? a[0].localeCompare(b[0]) : a[1].ok ? 1 : -1)).map(([n, h]) => el('span', { class: h.ok ? '' : 'bad', title: h.err || (h.n + ' headlines'), text: (h.ok ? '● ' : '○ ') + n })))) : null),
+      el('div', null, el('b', { text: 'The Daily Brief' }), el('br'), 'Saved stories, watch words and what you have read stay on this device. ',
+        el('button', { class: 'lnk', onclick: editWatch, text: 'Edit watch words' })));
+  }
+  function render() {
+    renderTop(); renderChapters();
+    const M = clear($('main')); if (GLOBE) { GLOBE.stop(); GLOBE = null; } GROT.r = null;
+    if (query) { const qq = query.toLowerCase(); const L = D.stories.filter((s) => (s.title + ' ' + (s.dek || '') + ' ' + s.orgs.join(' ') + ' ' + (s.places || []).map((p) => p.p).join(' ')).toLowerCase().includes(qq)).sort((a, b) => imp(b) - imp(a));
+      viewList(M, 'Search', L, `${L.length} ${L.length === 1 ? 'story matches' : 'stories match'} “${query}”`); }
+    else if (view === 'front') viewHome(M);
+    else if (CATS.includes(view)) viewCat(M, view);
+    else if (view === 'saved') viewSaved(M);
+    else { view = 'front'; viewHome(M); }
+    renderFoot();
+  }
+
+  /* ================= one story ================= */
+  function openDrawer(build) { const p = clear($('drPanel')); build(p); $('drawer').classList.add('open'); $('drawer').setAttribute('aria-hidden', 'false'); document.body.classList.add('lock'); p.scrollTop = 0; setTimeout(() => { const x = p.querySelector('.dr-x'); if (x) x.focus(); }, 60); }
+  function closeDrawer() { $('drawer').classList.remove('open'); $('drawer').setAttribute('aria-hidden', 'true'); if (!$('bm').classList.contains('open')) document.body.classList.remove('lock'); if (/^#(s|p)=/.test(location.hash)) history.replaceState(null, '', location.pathname + location.search); }
+  function saveBtn(s) {
+    return el('button', { class: 'btn' + (stars[s.id] ? ' on' : ''), onclick: (e) => { e.stopPropagation(); if (stars[s.id]) delete stars[s.id]; else stars[s.id] = Object.assign({}, s, { saved: Date.now() }); S.set('stars', stars);
+      e.currentTarget.classList.toggle('on', !!stars[s.id]); e.currentTarget.textContent = stars[s.id] ? '★ Saved' : '☆ Save'; renderChapters(); }, text: stars[s.id] ? '★ Saved' : '☆ Save' });
+  }
+  function openStory(id) {
+    const s = BYID[id] || stars[id]; if (!s) return; markSeen(s.id);
+    history.replaceState(null, '', '#s=' + id);
+    openDrawer((p) => {
+      p.append(el('div', { class: 'dr-art' }, artFor(s, true)), el('button', { class: 'ib dr-x', onclick: closeDrawer, 'aria-label': 'Close', text: '✕' }));
+      const off = s.orgs.filter((o) => /SEC|Fed|ECB|Bank|BLS|IMF|United Nations|NASA|WHO|USGS|EIA/i.test(o));
+      const sure = s.status === 'OFFICIAL' ? `Comes from an official source (${off.join(', ') || s.orgs[0]})` + (s.n > 1 ? `, and ${s.n - 1} more outlet${s.n > 2 ? 's' : ''} report it too.` : '.')
+        : s.status === 'VERIFIED' ? `Confirmed by ${s.n} independent newsrooms: ${s.orgs.join(', ')}.` : `Only ${s.orgs[0]} has reported this so far. Treat it as unconfirmed until others confirm it.`;
+      const rel = D.stories.filter((x) => x.id !== s.id && quality(x) && ((x.places || []).some((pp) => (s.places || []).some((q) => q.c === pp.c)) || (x.kw || []).some((k) => (s.kw || []).includes(k)))).sort((a, b) => imp(b) - imp(a)).slice(0, 4);
+      const m = marketArt(s);
+      p.append(el('div', { class: 'dr-body' }, kicker(s), el('h2', { text: s.title }), s.dek ? el('p', { class: 'dek big', text: s.dek }) : null,
+        el('div', { class: 'fine', text: (s.dek ? 'Teaser from ' + (s.reports.find((r) => r.u === s.link) || {}).o + '. ' : '') + 'First reported ' + dshort(s.first) + ', ' + hm(s.first) + ' · latest ' + hm(s.last) }),
+        m ? el('div', { class: 'tiles', style: { marginTop: '14px' } }, tile(m, true)) : null,
+        el('div', { class: 'dr-act' }, el('a', { class: 'btn pri', href: s.link, target: '_blank', rel: 'noopener noreferrer' }, 'Read the full story ↗'), saveBtn(s),
+          el('button', { class: 'btn', onclick: () => copy([s]), text: '⧉ Copy' }), navigator.share ? el('button', { class: 'btn', onclick: () => navigator.share({ title: s.title, url: s.link }).catch(() => {}), text: '↗ Share' }) : null),
+        el('h5', { text: 'How sure is this?' }), el('div', { class: 'explain', text: sure }),
+        (s.places || []).length ? [el('h5', { text: 'Where' }), el('div', { class: 'chips' }, s.places.map((pp) => el('button', { onclick: () => openPlace(pp.p), text: pp.p })))] : null,
+        el('h5', { text: 'Every report, in order' }),
+        (s.reports || []).map((r) => el('div', { class: 'rep' + (sinceMode() && r.ts > since ? ' fresh' : '') }, el('time', { text: (new Date(r.ts * 1000).toDateString() !== new Date().toDateString() ? dshort(r.ts) + ' ' : '') + hm(r.ts) }),
+          el('div', null, el('b', { text: r.o }), el('a', { href: r.u, target: '_blank', rel: 'noopener noreferrer', text: r.t })))),
+        rel.length ? [el('h5', { text: 'Related' }), el('div', { class: 'list' }, rel.map((x) => item(x, { noDek: true })))] : null));
+    });
+    document.querySelectorAll('[data-sid="' + s.id + '"]').forEach((n) => n.classList.add('read'));
+  }
+  function openPlace(label) {
+    const L = D.stories.filter((s) => (s.places || []).some((p) => p.p === label)).sort((a, b) => imp(b) - imp(a)); if (!L.length) return;
+    history.replaceState(null, '', '#p=' + encodeURIComponent(label));
+    const fake = { id: 'place-' + label, cat: L[0].cat, title: label, places: L[0].places.filter((p) => p.p === label).concat(L[0].places.filter((p) => p.p !== label)), kw: [] };
+    openDrawer((p) => p.append(el('div', { class: 'dr-art' }, artGlobe(fake, true)), el('button', { class: 'ib dr-x', onclick: closeDrawer, 'aria-label': 'Close', text: '✕' }),
+      el('div', { class: 'dr-body' }, el('div', { class: 'fine', text: 'PLACE' }), el('h2', { text: label }), el('p', { class: 'dek', text: L.length + (L.length > 1 ? ' stories' : ' story') + ' in the last 24 hours' }),
+        el('div', { class: 'list' }, L.map((s) => item(s, { noDek: true }))))));
+  }
+  function copy(L) {
+    const txt = L.map((s) => `${s.title}${s.dek ? '\n' + s.dek : ''}\n${s.status === 'VERIFIED' ? 'Confirmed by ' + s.n + ' newsrooms' : s.status === 'OFFICIAL' ? 'Official' : 'One source so far'}: ${(s.orgs || []).join(', ')}\n${s.link}`).join('\n\n');
+    (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject()).then(() => toast('Copied ' + L.length + (L.length > 1 ? ' stories' : ' story')), () => { prompt('Copy:', txt); });
+  }
+  function editWatch() {
+    openDrawer((p) => { const ta = el('textarea', { 'aria-label': 'Watch words, one per line' }); ta.value = (watch || []).join('\n');
+      p.append(el('button', { class: 'ib dr-x', onclick: closeDrawer, 'aria-label': 'Close', text: '✕' }), el('div', { class: 'dr-body', style: { marginTop: '64px' } },
+        el('div', { class: 'fine', text: 'YOUR WATCH WORDS' }), el('h2', { text: 'What should jump out at you?' }),
+        el('p', { class: 'dek', text: 'One word or name per line. Stories that mention them get a ★ and their own section on the overview. Turn on 🔔 to get a pop-up when a new one arrives.' }), ta,
+        el('div', { class: 'dr-act' }, el('button', { class: 'btn pri', onclick: () => { watch = ta.value.split(/\n|,/).map((x) => x.trim()).filter(Boolean).slice(0, 40); S.set('watch', watch); D = prepare(D); closeDrawer(); render(); toast('Watch words saved'); }, text: 'Save' }),
+          el('button', { class: 'btn', onclick: closeDrawer, text: 'Cancel' })))); });
+  }
+
+  /* ================= the 5-minute brief (swipe mode) ================= */
+  let BM = null;
+  function briefSlides() {
+    const S2 = [{ t: 'intro' }];
+    chapterOrder().forEach((c) => {
+      const L = storiesOf(c).filter(quality), pick = L.slice(0, c === 'science' || c === 'sport' ? 1 : c === 'world' || c === 'war' || c === 'economy' ? 3 : 2);
+      if (!pick.length) return; S2.push({ t: 'chapter', c, n: L.length }); pick.forEach((s) => S2.push({ t: 'story', c, s }));
+    });
+    S2.push({ t: 'outro' }); return S2;
+  }
+  function openBrief(startChapter) {
+    const slides = briefSlides(); let i = 0;
+    if (startChapter) { const k = slides.findIndex((x) => x.t === 'chapter' && x.c === startChapter); if (k > 0) i = k; }
+    BM = { slides, i }; $('bm').classList.add('open'); $('bm').setAttribute('aria-hidden', 'false'); document.body.classList.add('lock'); showSlide();
+  }
+  function closeBrief() { $('bm').classList.remove('open'); $('bm').setAttribute('aria-hidden', 'true'); document.body.classList.remove('lock'); BM = null; render(); }
+  function step(d) { if (!BM) return; const n = BM.i + d; if (n < 0) return; if (n >= BM.slides.length) { closeBrief(); return; } BM.i = n; showSlide(d); }
+  function chapterBounds() { const sl = BM.slides; let a = BM.i; while (a > 0 && sl[a].t !== 'chapter' && sl[a].t !== 'intro') a--; let b = BM.i + 1; while (b < sl.length && sl[b].t !== 'chapter' && sl[b].t !== 'outro') b++; return [a, b]; }
+  function showSlide(dir) {
+    const sl = BM.slides, x = sl[BM.i], stage = clear($('bmStage')), c = x.c;
+    $('bm').style.setProperty('--c', c ? cv(c) : 'var(--accent)');
+    const [a, b] = chapterBounds(); const bars = clear($('bmBars'));
+    for (let k = a; k < b; k++) bars.append(el('i', { class: k < BM.i ? 'done' : k === BM.i ? 'now' : '' }));
+    const stories = sl.filter((y) => y.t === 'story'), sn = sl.slice(0, BM.i + 1).filter((y) => y.t === 'story').length;
+    $('bmWhere').textContent = c ? cname(c) : x.t === 'intro' ? 'The 5-minute brief' : 'Done';
+    $('bmCount').textContent = stories.length ? `${sn} / ${stories.length}` : '';
+    const card = el('div', { class: 'slide ' + x.t + (dir ? (dir > 0 ? ' in-r' : ' in-l') : '') });
+    if (x.t === 'intro') {
+      const mv = (D.markets || []).filter((m) => isNum(m.p) && isNum(m.chg)).sort((p, q) => Math.abs(q.chg) - Math.abs(p.chg)).slice(0, 4);
+      card.append(el('div', { class: 'sl-in' }, el('div', { class: 'big-hi', text: greet() + '.' }),
+        el('p', { class: 'lede', text: `Here is ${DAY ? 'that day' : 'the world right now'} in ${stories.length} stories across ${sl.filter((y) => y.t === 'chapter').length} areas. About ${Math.max(2, Math.round(stories.length * 0.25))} minutes.` }),
+        sinceMode() ? el('p', { class: 'fine', text: 'Last visit: ' + ago(since) }) : null,
+        mv.length ? el('div', { class: 'tiles' }, mv.map((m) => tile(m, false, 'today'))) : null,
+        el('div', { class: 'chips big' }, sl.filter((y) => y.t === 'chapter').map((y) => el('button', { style: { '--c': cv(y.c) }, onclick: (e) => { e.stopPropagation(); BM.i = sl.indexOf(y); showSlide(1); } }, el('i'), SHORT[y.c]))),
+        el('button', { class: 'btn pri big', onclick: (e) => { e.stopPropagation(); step(1); } }, 'Start  →')));
+    } else if (x.t === 'chapter') {
+      const L = storiesOf(c), ms = (MKT[c] || []).map((k) => MK[k]).filter((m) => m && isNum(m.p)).slice(0, 4);
+      card.append(el('div', { class: 'sl-in center' }, el('div', { class: 'ch-ic', text: ICON[c] }), el('h1', { text: cname(c) }),
+        el('p', { class: 'lede', text: `${x.n} confirmed ${x.n === 1 ? 'story' : 'stories'} today · ${L.length} in total` }),
+        ms.length ? el('div', { class: 'tiles' }, ms.map((m) => tile(m, false, 'today'))) : null,
+        el('ul', { class: 'ch-list' }, L.filter(quality).slice(0, 4).map((s) => el('li', { text: s.title })))));
+    } else if (x.t === 'story') {
+      const s = x.s; markSeen(s.id);
+      const art = el('div', { class: 'sl-art' }, artFor(s, true)); const m = marketArt(s);
+      if (m) art.append(el('span', { class: 'mchip' }, m.name + ' ', el('b', { text: fmtP(m) }), ' ', el('i', { class: (m.chg || 0) >= 0 ? 'u' : 'd', text: fmtC(m.chg) })));
+      card.append(art, el('div', { class: 'sl-in' }, kicker(s), el('h2', { text: s.title }), s.dek ? el('p', { class: 'dek', text: s.dek }) : null, srcLine(s),
+        el('div', { class: 'dr-act' }, el('a', { class: 'btn pri', href: s.link, target: '_blank', rel: 'noopener noreferrer', onclick: (e) => e.stopPropagation() }, 'Read full story ↗'), saveBtn(s),
+          el('button', { class: 'btn', onclick: (e) => { e.stopPropagation(); openStory(s.id); }, text: 'All reports' }))));
+    } else {
+      card.append(el('div', { class: 'sl-in center' }, el('div', { class: 'ch-ic', text: '✓' }), el('h1', { text: 'You\'re up to date.' }),
+        el('p', { class: 'lede', text: 'That\'s the big picture. Open any area for the full story list, or come back later. The brief updates every few minutes.' }),
+        el('div', { class: 'dr-act center' }, el('button', { class: 'btn pri big', onclick: (e) => { e.stopPropagation(); closeBrief(); }, text: 'Back to the overview' }),
+          el('button', { class: 'btn big', onclick: (e) => { e.stopPropagation(); BM.i = 0; showSlide(-1); }, text: 'Start again' }))));
+    }
+    stage.append(card);
+    paintAll(card);
+    $('bmPrev').disabled = BM.i === 0;
+  }
+  function paintAll(root) { root.querySelectorAll('.art').forEach((b) => paint(b)); }
+  (function wireBrief() {
+    const st = $('bmStage'); let sx = 0, sy = 0, t0 = 0;
+    st.addEventListener('pointerdown', (e) => { sx = e.clientX; sy = e.clientY; t0 = Date.now(); });
+    st.addEventListener('pointerup', (e) => {
+      if (e.target.closest('a,button,.mchip')) return;
+      const dx = e.clientX - sx, dy = e.clientY - sy;
+      if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)) { step(dx < 0 ? 1 : -1); return; }
+      if (Math.abs(dx) < 10 && Math.abs(dy) < 10 && Date.now() - t0 < 500) { const b = st.getBoundingClientRect(); step(e.clientX - b.left < b.width * 0.3 ? -1 : 1); }
+    });
+    $('bmClose').onclick = closeBrief; $('bmPrev').onclick = () => step(-1); $('bmNext').onclick = () => step(1);
+    $('bmSkip').onclick = () => { if (!BM) return; const [, b] = chapterBounds(); BM.i = Math.min(BM.slides.length - 1, b); showSlide(1); };
+  })();
+
+  /* ================= navigation, refresh, alerts ================= */
+  function go(k) { view = k; query = ''; $('q').value = ''; S.set('view', k); render(); scrollTo({ top: 0, behavior: 'smooth' }); }
+  async function loadDay(day) {
+    if (!day || (LIVE && day === LIVE.date)) { DAY = null; D = prepare(LIVE); }
+    else { try { DAY = day; D = prepare(await getJSON('data/archive/' + day + '.json')); } catch (e) { toast('That day is not saved'); DAY = null; D = prepare(LIVE); } }
+    render();
+  }
+  $('prevDay').onclick = () => { const ref = DAY || LIVE.date, older = DAYS.filter((d) => d < ref); if (older.length) loadDay(older[0]); };
+  $('nextDay').onclick = () => { const newer = DAYS.filter((d) => d > DAY).sort(); loadDay(newer[0] && newer[0] < LIVE.date ? newer[0] : null); };
+  async function poll() {
+    try { const d = await getJSON('data/today.json'); if (LIVE && d.updated === LIVE.updated) return;
+      const old = new Set(LIVE ? LIVE.stories.map((s) => s.id) : []); LIVE = d;
+      if (!DAY) { const y = scrollY; D = prepare(LIVE); if (!$('drawer').classList.contains('open') && !BM) { render(); scrollTo(0, y); } else renderTop(); }
+      if (old.size) { const fresh = d.stories.filter((s) => !old.has(s.id) && (s.breaking || watched(s)));
+        fresh.slice(0, 3).forEach((s) => { toast((s.breaking ? 'Breaking: ' : '★ ') + s.title.slice(0, 80));
+          if (alerts && 'Notification' in window && Notification.permission === 'granted') { try { const n = new Notification(s.breaking ? 'Breaking · The Daily Brief' : '★ Watch word · The Daily Brief', { body: s.title + '\n' + s.orgs.slice(0, 3).join(', '), icon: 'icon-192.png', tag: s.id }); n.onclick = () => { focus(); openStory(s.id); }; } catch (e) { /* */ } } }); }
+      getJSON('data/archive/index.json').then((x) => { DAYS = x.days || []; renderTop(); }).catch(() => {});
+    } catch (e) { /* offline: keep what we have */ }
+  }
+  function applyTheme(t) { document.documentElement.dataset.theme = t; $('theme').textContent = t === 'dark' ? '☀' : '☾'; const mt = document.querySelector('meta[name=theme-color]'); if (mt) mt.content = t === 'dark' ? '#0C0D10' : '#F6F4EF'; }
+  let theme = S.get('theme', matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'); applyTheme(theme);
+  $('theme').onclick = () => { theme = theme === 'dark' ? 'light' : 'dark'; S.set('theme', theme); applyTheme(theme); };
+  $('bell').classList.toggle('on', alerts);
+  $('bell').onclick = async () => {
+    if (!alerts && 'Notification' in window && Notification.permission !== 'granted') { try { await Notification.requestPermission(); } catch (e) { /* */ } }
+    alerts = !alerts; S.set('alerts', alerts); $('bell').classList.toggle('on', alerts); toast(alerts ? 'Alerts on: breaking news and your watch words' : 'Alerts off');
+  };
+  $('watchBtn').onclick = editWatch; $('playBtn').onclick = () => openBrief();
+  $('home').onclick = (e) => { e.preventDefault(); if (DAY) loadDay(null); go('front'); };
+  $('drShade').onclick = closeDrawer;
+  $('searchBtn').onclick = () => { document.body.classList.toggle('searching'); if (document.body.classList.contains('searching')) $('q').focus(); };
+  let qt = 0; $('q').addEventListener('input', (e) => { clearTimeout(qt); qt = setTimeout(() => { query = e.target.value.trim(); render(); }, 180); });
+  document.addEventListener('keydown', (e) => {
+    if (BM) { if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); step(1); } else if (e.key === 'ArrowLeft') step(-1); else if (e.key === 'Escape') { if ($('drawer').classList.contains('open')) closeDrawer(); else closeBrief(); } return; }
+    if (e.key === 'Escape') { if ($('drawer').classList.contains('open')) closeDrawer(); else if (query) { query = ''; $('q').value = ''; render(); } }
+    if (e.key === '/' && !/INPUT|TEXTAREA/.test(document.activeElement.tagName)) { e.preventDefault(); document.body.classList.add('searching'); $('q').focus(); }
+  });
+  function leave() { S.set('lastVisit', now()); saveSnap(); hiddenAt = now(); }
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) leave();
+    else if (hiddenAt && now() - hiddenAt > 30 * 60) { since = S.get('lastVisit', since); snapPrev = S.get('snap', snapPrev); poll().then(() => { if (!BM) render(); }); }
+    else poll();
+  });
+  setTimeout(() => { S.set('lastVisit', now()); saveSnap(); }, 30000);
+
+  /* ================= start ================= */
   async function start() {
     const mapP = fetch('vendor/world-lite.json').then((r) => r.json()).then((t) => { TOPO = t; const fc = topojson.feature(t, t.objects.countries); FEATS = fc.features.filter((f) => f.properties.name !== 'Antarctica').map(fixShape).filter(Boolean);
       FEATS.forEach((f) => { CENT[f.properties.name] = CENT_FIX[f.properties.name] || d3.geoCentroid(f); }); MESH = topojson.mesh(t, t.objects.countries, (a, b) => a !== b); }).catch(() => {});
@@ -556,6 +703,7 @@
     try { DAYS = (await getJSON('data/archive/index.json')).days || []; } catch (e) { DAYS = []; }
     render();
     const h = location.hash; if (h.startsWith('#s=')) openStory(h.slice(3)); else if (h.startsWith('#p=')) openPlace(decodeURIComponent(h.slice(3)));
+    else if (h === '#brief') openBrief();
     setInterval(poll, 120000);
     if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(() => {});
   }

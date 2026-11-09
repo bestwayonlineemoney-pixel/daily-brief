@@ -39,11 +39,18 @@ MAP = SITE / "vendor" / "world-lite.json"
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36"
 KEEP_H = 72          # items kept for grouping / developing stories
 GROUP_GAP = 18 * 3600
-CATS = ["world", "war", "economy", "home", "crypto", "tech", "science", "sport"]
-TOP_CAP = {"world": 4, "war": 4, "economy": 4, "crypto": 3, "tech": 3, "science": 2, "sport": 1, "home": 2}
+CATS = ["world", "war", "economy", "forex", "commodities", "energy", "crypto", "home", "tech", "science", "sport"]
+TOP_CAP = {"world": 3, "war": 3, "economy": 3, "forex": 2, "commodities": 2, "energy": 2, "crypto": 2, "home": 2, "tech": 2, "science": 1, "sport": 1}
+MARKET_CATS = ["energy", "commodities", "forex", "crypto", "economy"]
 TIER_RANK = {"official": 0, "major": 1, "news": 2, "regional": 3}
 
 RX = {
+    "energy": re.compile(r"\b(oil|crude|brent|wti|opec\+?|natural gas|lng|gasoline|petrol|diesel|refiner(y|ies)|pipelines?|tankers?|barrels?|oilfield|"
+                         r"shale|power grid|electricity prices?|power prices?|energy prices?|energy crisis|nuclear power|coal|renewables?|solar power|wind power|hormuz)\b", re.I),
+    "commodities": re.compile(r"\b(gold|silver|platinum|palladium|copper|iron ore|aluminium|aluminum|nickel|lithium|zinc|cobalt|rare earths?|wheat|corn|soybeans?|"
+                              r"coffee|cocoa|sugar|cotton|palm oil|rice prices?|commodit(y|ies)|metals?|bullion|mining)\b", re.I),
+    "forex": re.compile(r"\b(forex|fx|currenc(y|ies)|exchange rates?|dollar|greenback|euro|sterling|pound|yen|yuan|renminbi|rupee|rupiah|lira|peso|rand|ruble|rouble|"
+                        r"franc|dirham|riyal|dxy|eur/usd|usd/jpy|gbp/usd|devaluation|peg|intervention)\b", re.I),
     "war": re.compile(r"\b(war|wars|airstrikes?|air strikes?|missiles?|drones?|troops|soldiers|army|military|ceasefire|truce|invasion|invade[sd]?|offensive|shelling|"
                       r"bombs?|bombing|bombard\w*|killed in|hostages?|militants?|rebels?|frontline|front line|artillery|warships?|navy|idf|hamas|hezbollah|houthis?|"
                       r"gaza|kyiv|kharkiv|donbas|hormuz|nato|insurgents?|massacre|shot down|strikes? on)\b", re.I),
@@ -58,7 +65,8 @@ RX = {
     "sport": re.compile(r"\b(football|soccer|cricket|premier league|champions league|world cup|olympics?|tennis|formula 1|f1|grand prix|nba|nfl|golf|rugby|"
                         r"match|tournament|goal|striker|coach|test series|t20|odi)\b", re.I),
 }
-AUTO_ORDER = ["war", "economy", "crypto", "tech", "science", "sport"]
+AUTO_ORDER = ["war", "crypto", "energy", "commodities", "forex", "economy", "tech", "science", "sport"]
+REFINE = ["crypto", "energy", "commodities", "forex"]
 HOT = {"breaking": 3, "killed": 3, "dead": 2, "earthquake": 3, "tsunami": 4, "attack": 2, "strike": 2, "missile": 2, "invasion": 4, "ceasefire": 3, "nuclear": 3,
        "election": 2, "resign": 3, "impeach": 3, "arrest": 2, "verdict": 2, "coup": 4, "assassinat": 4, "hurricane": 3, "typhoon": 3, "cyclone": 3, "flood": 2,
        "wildfire": 2, "pandemic": 3, "outbreak": 2, "fed ": 3, "rate cut": 4, "rate hike": 4, "inflation": 3, "cpi": 4, "jobs report": 4, "recession": 3,
@@ -69,6 +77,8 @@ may might says say said new news live latest update updates report reports amid 
 how not more most first last day days week year years today here heres more just get gets got make makes made video watch photos analysis opinion""".split())
 KW = [("btc", r"\bbitcoin|\bbtc\b"), ("eth", r"\bether(eum)?\b|\beth\b"), ("sol", r"\bsolana\b"), ("xrp", r"\bxrp\b|\bripple\b"),
       ("oil", r"\boil\b|\bcrude\b|\bbrent\b|\bopec\b"), ("gold", r"\bgold\b"), ("spx", r"s&p|\bstocks?\b|wall street|\bdow\b|nasdaq|\bshares\b"),
+      ("wti", r"\bwti\b"), ("gas", r"natural gas|\blng\b"), ("silver", r"\bsilver\b"), ("copper", r"\bcopper\b"), ("wheat", r"\bwheat\b"),
+      ("jpy", r"\byen\b"), ("gbp", r"\bsterling\b|\bpound\b"), ("eur", r"\beuro\b"), ("cny", r"\byuan\b"), ("inr", r"indian rupee|\brupee\b.*india"),
       ("dxy", r"\bdollar\b"), ("tnx", r"\byields?\b|\btreasur(y|ies)\b|\bbonds?\b"), ("vix", r"\bvolatility\b|\bvix\b"), ("lkr", r"\brupee\b")]
 KW = [(k, re.compile(p, re.I)) for k, p in KW]
 SUFFIX = re.compile(r"\s+[-|–—]\s+(BBC News|Reuters|AP News|Al Jazeera|The Guardian|CNBC|Bloomberg|Fox News|CNN|NPR|DW|France 24|Sky News|ABC News|CBS News|"
@@ -134,6 +144,30 @@ def when(s):
     return None
 
 
+JUNK = re.compile(r"(The post .{0,200} appeared first on .*$|Continue reading.*$|Read more.*$|Read full story.*$|\[…\]|\[\.\.\.\]|…\s*$|Click here.*$|Sign up for .*$)", re.I)
+
+
+def dek(raw, title):
+    """The outlet's own one or two line teaser from its feed, cleaned and kept short (never the article)."""
+    t = clean(raw or "")
+    t = JUNK.sub("", t).strip(" -–—|·")
+    t = re.sub(r"^(VIDEO|WATCH|LIVE|PHOTOS|LISTEN)\s*[:|-]\s*", "", t, flags=re.I)
+    if len(t) < 40:
+        return ""
+    a, b = tokens(title), tokens(t[:len(title) + 40])
+    if a and len(a & b) / len(a) > 0.8 and len(t) < len(title) + 30:
+        return ""                      # just repeats the headline
+    if t.lower().startswith(title.lower()[:60]):
+        t = t[len(title):].lstrip(" .:-–—")
+        if len(t) < 40:
+            return ""
+    if len(t) > 240:
+        cut = t[:240]
+        end = max(cut.rfind(". "), cut.rfind("? "), cut.rfind("! "))
+        t = cut[:end + 1] if end > 110 else cut[:cut.rfind(" ")].rstrip(",;:") + "…"
+    return t
+
+
 def parse_feed(body):
     body = re.sub(rb"^\s+", b"", body)
     root = ET.fromstring(body)
@@ -153,9 +187,15 @@ def parse_feed(body):
                     d.setdefault("link", href.strip())
             elif ct in ("pubdate", "published", "updated", "date", "issued") and "ts" not in d:
                 d["ts"] = when(c.text)
+            elif ct in ("description", "summary") and "desc" not in d:
+                d["desc"] = "".join(c.itertext())
+            elif ct == "encoded" and "enc" not in d:
+                d["enc"] = "".join(c.itertext())[:3000]
             elif ct == "guid" and "link" not in d and (c.text or "").strip().startswith("http") and c.get("isPermaLink") != "false":
                 d["link"] = c.text.strip()
         if d.get("title") and str(d.get("link", "")).startswith(("http://", "https://")) and len(d["title"]) > 12:
+            d["desc"] = dek(d.get("desc") or d.pop("enc", ""), d["title"])
+            d.pop("enc", None)
             out.append(d)
     return out
 
@@ -173,6 +213,11 @@ def fetch(feed):
 
 # ---------------- understanding ----------------
 def classify(title, feed_cat):
+    if feed_cat == "economy":            # business feeds: put oil, metals, currencies and crypto in their own chapters
+        for k in REFINE:
+            if RX[k].search(title):
+                return k
+        return "economy"
     if feed_cat not in ("world", "auto"):
         return feed_cat
     for k in AUTO_ORDER:
@@ -248,6 +293,8 @@ def build(stories, conf, now):
         recent = [i for i in its if i["ts"] >= s["last"] - 12 * 3600] or its
         lead = sorted(recent, key=lambda i: (TIER_RANK.get(i["tier"], 3), -i["ts"]))[0]
         text = " ".join(i["title"] for i in its)
+        dk = next((i.get("d") for i in [lead] + sorted(recent, key=lambda i: (TIER_RANK.get(i["tier"], 3), -i["ts"]))
+                   + sorted(its, key=lambda i: (TIER_RANK.get(i["tier"], 3), -i["ts"])) if i.get("d")), "")
         h = hot_of(text)
         pl = geo.places(lead["title"] + " · " + " · ".join(i["title"] for i in its[:6]), MAP)
         n = len(orgs)
@@ -263,16 +310,21 @@ def build(stories, conf, now):
             seen_org.add(i["org"])
             reports.append({"o": i["org"], "t": i["title"], "u": i["link"], "ts": int(i["ts"])})
         sid = hashlib.sha1(sorted(its, key=lambda i: i["ts"])[0]["link"].encode()).hexdigest()[:10]
-        out.append({"id": sid, "cat": cat, "title": lead["title"], "link": lead["link"], "orgs": orgs, "n": n, "status": status,
+        out.append({"id": sid, "cat": cat, "title": lead["title"], "dek": dk, "link": lead["link"], "orgs": orgs, "n": n, "status": status,
                     "first": int(s["first"]), "last": int(s["last"]), "score": round(score, 2), "hot": h,
                     "places": pl, "home": cat == "home" or any(p["c"] in homes for p in pl), "kw": kw_of(text),
+                    "also": [k for k in MARKET_CATS if k != cat and RX[k].search(text)][:3],
                     "developing": developing, "breaking": breaking, "reports": reports[-10:]})
     return out
 
 
 # ---------------- market numbers ----------------
-YAHOO = [("spx", "^GSPC", "S&P 500"), ("ndx", "^IXIC", "Nasdaq"), ("gold", "GC=F", "Gold"), ("oil", "BZ=F", "Brent oil"), ("dxy", "DX-Y.NYB", "Dollar index"),
-         ("tnx", "^TNX", "US 10Y yield"), ("vix", "^VIX", "VIX fear gauge"), ("eur", "EURUSD=X", "EUR/USD"), ("lkr", "LKR=X", "USD/LKR")]
+YAHOO = [("spx", "^GSPC", "S&P 500", "stocks"), ("ndx", "^IXIC", "Nasdaq", "stocks"), ("dji", "^DJI", "Dow Jones", "stocks"), ("tnx", "^TNX", "US 10Y yield", "stocks"),
+         ("vix", "^VIX", "VIX fear gauge", "stocks"),
+         ("dxy", "DX-Y.NYB", "Dollar index", "forex"), ("eur", "EURUSD=X", "EUR/USD", "forex"), ("gbp", "GBPUSD=X", "GBP/USD", "forex"), ("jpy", "JPY=X", "USD/JPY", "forex"),
+         ("cny", "CNY=X", "USD/CNY", "forex"), ("inr", "INR=X", "USD/INR", "forex"), ("lkr", "LKR=X", "USD/LKR", "forex"),
+         ("gold", "GC=F", "Gold", "commodities"), ("silver", "SI=F", "Silver", "commodities"), ("copper", "HG=F", "Copper", "commodities"), ("wheat", "ZW=F", "Wheat", "commodities"),
+         ("oil", "BZ=F", "Brent oil", "energy"), ("wti", "CL=F", "WTI oil", "energy"), ("gas", "NG=F", "Natural gas", "energy")]
 COINS = [("btc", "bitcoin", "Bitcoin"), ("eth", "ethereum", "Ethereum"), ("sol", "solana", "Solana"), ("xrp", "ripple", "XRP")]
 
 
@@ -285,7 +337,7 @@ def thin(v, n=48):
 
 
 def yahoo(item):
-    key, sym, name = item
+    key, sym, name, grp = item
     for host in ("query1", "query2"):
         try:
             j = get_json(f"https://{host}.finance.yahoo.com/v8/finance/chart/{urllib.request.quote(sym)}?range=1mo&interval=1d", timeout=15)
@@ -293,10 +345,10 @@ def yahoo(item):
             closes = [x for x in r["indicators"]["quote"][0]["close"] if x is not None]
             price = r["meta"].get("regularMarketPrice") or closes[-1]
             prev = closes[-2] if len(closes) > 1 else None
-            return {"k": key, "name": name, "sym": sym, "p": price, "chg": (price / prev - 1) * 100 if prev else None, "spark": thin(closes), "src": "Yahoo Finance"}
+            return {"k": key, "name": name, "sym": sym, "p": price, "chg": (price / prev - 1) * 100 if prev else None, "spark": thin(closes), "src": "Yahoo Finance", "g": grp}
         except Exception:  # noqa
             continue
-    return {"k": key, "name": name, "sym": sym, "p": None, "err": True}
+    return {"k": key, "name": name, "sym": sym, "p": None, "err": True, "g": grp}
 
 
 def markets():
@@ -309,10 +361,10 @@ def markets():
             r = by.get(cid)
             if r:
                 out.append({"k": k, "name": name, "sym": r["symbol"].upper(), "p": r["current_price"], "chg": r.get("price_change_percentage_24h"),
-                            "spark": thin((r.get("sparkline_in_7d") or {}).get("price") or []), "src": "CoinGecko"})
+                            "spark": thin((r.get("sparkline_in_7d") or {}).get("price") or []), "src": "CoinGecko", "g": "crypto"})
     except Exception:  # noqa
-        out += [{"k": k, "name": n, "sym": k.upper(), "p": None, "err": True} for k, _, n in COINS]
-    with ThreadPoolExecutor(5) as ex:
+        out += [{"k": k, "name": n, "sym": k.upper(), "p": None, "err": True, "g": "crypto"} for k, _, n in COINS]
+    with ThreadPoolExecutor(6) as ex:
         out += list(ex.map(yahoo, YAHOO))
     fng = None
     try:
@@ -380,7 +432,7 @@ def run(verbose=True):
                 if ts < now - KEEP_H * 3600:
                     continue
                 fcat = feed.get("cat", "world")
-                store[it["link"]] = {"title": it["title"], "link": it["link"], "ts": ts, "seen": seen, "src": feed["name"], "org": feed.get("org") or feed["name"],
+                store[it["link"]] = {"title": it["title"], "d": it.get("desc", ""), "link": it["link"], "ts": ts, "seen": seen, "src": feed["name"], "org": feed.get("org") or feed["name"],
                                      "tier": feed.get("tier", "news"), "fcat": fcat, "cat": classify(it["title"], fcat)}
     store = {k: v for k, v in store.items() if v["ts"] >= now - KEEP_H * 3600}
     write(STATE / "items.json", store)
@@ -391,7 +443,7 @@ def run(verbose=True):
     by = {k: [s for s in day if s["cat"] == k] for k in CATS}
     keep = []
     for k in CATS:
-        keep += by[k][:45]
+        keep += by[k][:40]
     keep += [s for s in day if s["home"] and s["cat"] != "home"][:20]
     seen_ids, final = set(), []
     for s in sorted(keep, key=lambda s: -s["score"]):

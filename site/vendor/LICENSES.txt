@@ -1,4 +1,4 @@
 d3 v7 (ISC) - https://d3js.org
 topojson-client (ISC) - https://github.com/topojson/topojson-client
 world map: Natural Earth (public domain) via world-atlas (ISC)
-Fonts under the SIL Open Font License 1.1: Anton, Plus Jakarta Sans, JetBrains Mono
+Fonts under the SIL Open Font License 1.1: Anton, Newsreader, Inter, Plus Jakarta Sans, JetBrains Mono
