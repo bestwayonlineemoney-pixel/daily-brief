@@ -390,55 +390,137 @@ def markets():
 
 
 # ---------------- macro numbers (official statistics via the St. Louis Fed's FRED) ----------------
-# (key, FRED series, name, region, group, how to show it, original source)
+# (key, name, region, group, how to show it, original source, [sources tried in order])
+# a source is (kind, id) or (kind, id, how) when that source already gives the final figure (e.g. an annual rate)
 MACRO = [
-    ("us_cpi", "CPIAUCSL", "Inflation (CPI)", "United States", "Inflation", "yoy", "US BLS"),
-    ("us_core", "CPILFESL", "Core inflation", "United States", "Inflation", "yoy", "US BLS"),
-    ("us_pce", "PCEPILFE", "Core PCE (Fed's gauge)", "United States", "Inflation", "yoy", "US BEA"),
-    ("us_unemp", "UNRATE", "Unemployment rate", "United States", "Jobs", "level%", "US BLS"),
-    ("us_nfp", "PAYEMS", "Jobs added (payrolls)", "United States", "Jobs", "diffk", "US BLS"),
-    ("us_claims", "ICSA", "Weekly jobless claims", "United States", "Jobs", "levelk", "US Dept. of Labor"),
-    ("us_fed", "DFF", "Fed funds rate", "United States", "Rates", "level%", "Federal Reserve"),
-    ("us_10y", "DGS10", "10-year Treasury yield", "United States", "Rates", "level%", "US Treasury"),
-    ("us_2y", "DGS2", "2-year Treasury yield", "United States", "Rates", "level%", "US Treasury"),
-    ("us_curve", "T10Y2Y", "Yield curve (10y − 2y)", "United States", "Rates", "levelpt", "Federal Reserve"),
-    ("us_gdp", "A191RL1Q225SBEA", "GDP growth (annualised)", "United States", "Growth", "level%", "US BEA"),
-    ("us_retail", "RSAFS", "Retail sales (month)", "United States", "Growth", "mom", "US Census Bureau"),
-    ("us_sent", "UMCSENT", "Consumer sentiment", "United States", "Growth", "level", "Univ. of Michigan"),
-    ("ea_rate", "ECBDFR", "ECB deposit rate", "Euro area", "Rates", "level%", "ECB"),
-    ("ea_cpi", "CP0000EZ19M086NEST", "Inflation (HICP)", "Euro area", "Inflation", "yoy", "Eurostat"),
-    ("ea_unemp", "LRHUTTTTEZM156S", "Unemployment rate", "Euro area", "Jobs", "level%", "OECD / Eurostat"),
-    ("uk_rate", "BOERUKM", "Bank of England rate", "United Kingdom", "Rates", "level%", "Bank of England"),
-    ("uk_cpi", "GBRCPIALLMINMEI", "Inflation (CPI)", "United Kingdom", "Inflation", "yoy", "ONS via OECD"),
-    ("jp_cpi", "JPNCPIALLMINMEI", "Inflation (CPI)", "Japan", "Inflation", "yoy", "Statistics Japan via OECD"),
+    ("us_cpi", "Inflation (CPI)", "United States", "Inflation", "yoy", "US BLS", [("fred", "CPIAUCSL"), ("dbn", "BLS/cu/CUSR0000SA0"), ("fredcsv", "CPIAUCSL")]),
+    ("us_core", "Core inflation", "United States", "Inflation", "yoy", "US BLS", [("fred", "CPILFESL"), ("dbn", "BLS/cu/CUSR0000SA0L1E"), ("fredcsv", "CPILFESL")]),
+    ("us_pce", "Core PCE (Fed's gauge)", "United States", "Inflation", "yoy", "US BEA", [("fred", "PCEPILFE"), ("dbn", "BEA/NIPA-T20804/DPCCRG-M"), ("fredcsv", "PCEPILFE")]),
+    ("us_unemp", "Unemployment rate", "United States", "Jobs", "level%", "US BLS", [("fred", "UNRATE"), ("dbn", "BLS/ln/LNS14000000"), ("fredcsv", "UNRATE")]),
+    ("us_nfp", "Jobs added (payrolls)", "United States", "Jobs", "diffk", "US BLS", [("fred", "PAYEMS"), ("dbn", "BLS/ce/CES0000000001"), ("fredcsv", "PAYEMS")]),
+    ("us_claims", "Weekly jobless claims", "United States", "Jobs", "levelk", "US Dept. of Labor", [("fred", "ICSA"), ("fredcsv", "ICSA")]),
+    ("us_fed", "Fed funds rate", "United States", "Rates", "level%", "Federal Reserve (NY Fed)", [("fred", "DFF"), ("nyfed", "effr"), ("fredcsv", "DFF")]),
+    ("us_10y", "10-year Treasury yield", "United States", "Rates", "level%", "US Treasury", [("fred", "DGS10"), ("ust", "10 Yr"), ("fredcsv", "DGS10")]),
+    ("us_2y", "2-year Treasury yield", "United States", "Rates", "level%", "US Treasury", [("fred", "DGS2"), ("ust", "2 Yr"), ("fredcsv", "DGS2")]),
+    ("us_curve", "Yield curve (10y − 2y)", "United States", "Rates", "levelpt", "US Treasury", [("fred", "T10Y2Y"), ("ust", "10 Yr-2 Yr"), ("fredcsv", "T10Y2Y")]),
+    ("us_gdp", "GDP growth (annualised)", "United States", "Growth", "level%", "US BEA", [("fred", "A191RL1Q225SBEA"), ("dbn", "BEA/NIPA-T10101/A191RL-Q"), ("fredcsv", "A191RL1Q225SBEA")]),
+    ("us_retail", "Retail sales (month)", "United States", "Growth", "mom", "US Census Bureau", [("fred", "RSAFS"), ("fredcsv", "RSAFS")]),
+    ("us_sent", "Consumer sentiment", "United States", "Growth", "level", "Univ. of Michigan", [("fred", "UMCSENT"), ("fredcsv", "UMCSENT")]),
+    ("ea_rate", "ECB deposit rate", "Euro area", "Rates", "level%", "ECB", [("ecb", "FM/D.U2.EUR.4F.KR.DFR.LEV"), ("fred", "ECBDFR"), ("fredcsv", "ECBDFR")]),
+    ("ea_cpi", "Inflation (HICP)", "Euro area", "Inflation", "yoy", "Eurostat / ECB", [("ecb", "ICP/M.U2.N.000000.4.ANR", "level%"), ("fred", "CP0000EZ19M086NEST"), ("fredcsv", "CP0000EZ19M086NEST")]),
+    ("ea_unemp", "Unemployment rate", "Euro area", "Jobs", "level%", "Eurostat", [("eurostat", "une_rt_m?geo=EA20&s_adj=SA&age=TOTAL&sex=T&unit=PC_ACT"), ("fred", "LRHUTTTTEZM156S")]),
+    ("uk_rate", "Bank of England rate", "United Kingdom", "Rates", "level%", "Bank of England", [("boe", "IUDBEDR"), ("fred", "BOERUKM"), ("fredcsv", "BOERUKM")]),
+    ("uk_cpi", "Inflation (CPI)", "United Kingdom", "Inflation", "yoy", "ONS", [("dbn", "ONS/MM23/D7G7.M", "level%"), ("fred", "GBRCPIALLMINMEI"), ("fredcsv", "GBRCPIALLMINMEI")]),
+    ("jp_cpi", "Inflation (CPI)", "Japan", "Inflation", "yoy", "Statistics Japan", [("fred", "JPNCPIALLMINMEI"), ("fredcsv", "JPNCPIALLMINMEI")]),
 ]
 IMPORTANT_RELEASES = re.compile(r"consumer price index|employment situation|gross domestic product|personal income|producer price|retail|"
                                 r"jobless|unemployment insurance|job openings|fomc|h\.15|industrial production|housing starts|consumer sentiment|durable goods", re.I)
 
 
-def fred_csv(series, start):
-    raw = get(f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series}&cosd={start}", timeout=25).decode("utf-8", "replace")
-    rows = []
-    for line in raw.strip().splitlines()[1:]:
-        parts = line.split(",")
-        if len(parts) >= 2 and parts[1] not in (".", ""):
-            try:
-                rows.append((parts[0], float(parts[1])))
-            except ValueError:
-                pass
+def _d(period):
+    """'2025-09' / '2025-Q3' / '2025-09-30' / '09/30/2025' -> '2025-09-01' style date"""
+    p = str(period).strip()
+    if re.match(r"^\d{2}/\d{2}/\d{4}$", p):
+        return f"{p[6:10]}-{p[0:2]}-{p[3:5]}"
+    m = re.match(r"^(\d{4})-?Q([1-4])$", p)
+    if m:
+        return f"{m.group(1)}-{(int(m.group(2)) - 1) * 3 + 1:02d}-01"
+    if re.match(r"^\d{4}-\d{2}$", p) or re.match(r"^\d{4}M\d{2}$", p):
+        return p[:4] + "-" + p[-2:] + "-01"
+    return p[:10]
+
+
+def _num(x):
+    try:
+        v = float(x)
+        return v if v == v else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _csv_rows(text):
+    import csv
+    import io
+    return list(csv.DictReader(io.StringIO(text)))
+
+
+def src_fetch(kind, sid, start):
+    """Return [(date, value), ...] oldest first, straight from the official publisher (or a faithful mirror)."""
+    if kind == "fred":
+        key = os.environ.get("FRED_API_KEY", "").strip()
+        if not key:
+            raise ValueError("no FRED key")
+        j = get_json(f"https://api.stlouisfed.org/fred/series/observations?series_id={sid}&api_key={key}&file_type=json&observation_start={start}", timeout=25)
+        rows = [(o["date"], _num(o["value"])) for o in j["observations"]]
+    elif kind == "fredcsv":
+        raw = get(f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={sid}&cosd={start}", timeout=20).decode("utf-8", "replace")
+        rows = [(l.split(",")[0], _num(l.split(",")[1])) for l in raw.strip().splitlines()[1:] if "," in l]
+    elif kind == "dbn":                       # DBnomics: an exact mirror of the official agency releases
+        j = get_json(f"https://api.db.nomics.world/v22/series/{sid}?observations=1&format=json", timeout=25)
+        doc = j["series"]["docs"][0]
+        rows = [(_d(p), _num(v)) for p, v in zip(doc["period"], doc["value"])]
+    elif kind == "nyfed":
+        j = get_json("https://markets.newyorkfed.org/api/rates/unsecured/effr/last/500.json", timeout=25)
+        rows = sorted((r["effectiveDate"], _num(r["percentRate"])) for r in j["refRates"])
+    elif kind == "ust":                       # US Treasury daily par yield curve
+        y = datetime.now(timezone.utc).year
+        rows = []
+        for yr in (y - 1, y):
+            txt = get(f"https://home.treasury.gov/resource-center/data-chart-center/interest-rates/daily-treasury-rates.csv/{yr}/all"
+                      f"?type=daily_treasury_yield_curve&field_tdr_date_value={yr}&page&_format=csv", timeout=25).decode("utf-8-sig", "replace")
+            for r in _csv_rows(txt):
+                if "-" in sid:
+                    a, b = sid.split("-")
+                    v = _num(r.get(a)) - _num(r.get(b)) if _num(r.get(a)) is not None and _num(r.get(b)) is not None else None
+                else:
+                    v = _num(r.get(sid))
+                rows.append((_d(r.get("Date", "")), v))
+        rows.sort()
+    elif kind == "ecb":
+        flow, key = sid.split("/", 1)
+        txt = get(f"https://data-api.ecb.europa.eu/service/data/{flow}/{key}?format=csvdata&startPeriod={start[:7]}", timeout=25, headers={"Accept": "text/csv"}).decode("utf-8", "replace")
+        rows = [(_d(r["TIME_PERIOD"]), _num(r["OBS_VALUE"])) for r in _csv_rows(txt)]
+    elif kind == "eurostat":
+        ds, q = sid.split("?", 1)
+        j = get_json(f"https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/{ds}?{q}&sinceTimePeriod={start[:7]}", timeout=25)
+        idx = j["dimension"]["time"]["category"]["index"]
+        rows = sorted((_d(t), _num(j["value"].get(str(i)))) for t, i in idx.items())
+    elif kind == "boe":
+        d0 = datetime.strptime(start, "%Y-%m-%d").strftime("%d/%b/%Y")
+        txt = get(f"https://www.bankofengland.co.uk/boeapps/database/_iadb-fromshowcolumns.asp?csv.x=yes&Datefrom={d0}&Dateto=now&SeriesCodes={sid}&CSVF=TN&UsingCodes=Y&VPD=Y&VFD=N",
+                  timeout=25).decode("utf-8", "replace")
+        rows = []
+        for line in txt.strip().splitlines()[1:]:
+            p = line.split(",")
+            if len(p) >= 2:
+                try:
+                    rows.append((datetime.strptime(p[0].strip(), "%d %b %Y").strftime("%Y-%m-%d"), _num(p[1])))
+                except ValueError:
+                    pass
+        rows.sort()
+    else:
+        raise ValueError("unknown source")
+    rows = [(d, v) for d, v in rows if v is not None and d]
+    if len(rows) < 3:
+        raise ValueError("no data")
     return rows
 
 
 def macro_one(spec):
-    key, sid, name, region, group, how, src = spec
-    try:
-        rows = fred_csv(sid, (datetime.now(timezone.utc) - timedelta(days=365 * 4)).strftime("%Y-%m-%d"))
-        if len(rows) < 3:
-            raise ValueError("no data")
+    key, name, region, group, how0, src, sources = spec
+    start = (datetime.now(timezone.utc) - timedelta(days=365 * 4)).strftime("%Y-%m-%d")
+    errs = []
+    for so in sources:
+        kind, sid = so[0], so[1]
+        how = so[2] if len(so) > 2 else how0
+        try:
+            rows = src_fetch(kind, sid, start)
+        except Exception as e:  # noqa
+            errs.append(f"{kind}: {str(e)[:60]}")
+            continue
         dates, vals = [r[0] for r in rows], [r[1] for r in rows]
         if how == "yoy":                       # index -> % change on a year earlier
-            step = 12 if len(dates) > 13 and dates[-1][5:7] != dates[-2][5:7] else 4
-            series = [(dates[i], (vals[i] / vals[i - step] - 1) * 100) for i in range(step, len(vals))]
+            series = [(dates[i], (vals[i] / vals[i - 12] - 1) * 100) for i in range(12, len(vals))]
             unit = "%"
         elif how == "mom":
             series = [(dates[i], (vals[i] / vals[i - 1] - 1) * 100) for i in range(1, len(vals))]
@@ -452,14 +534,23 @@ def macro_one(spec):
         else:
             series = list(zip(dates, vals))
             unit = "%" if how == "level%" else " pts" if how == "levelpt" else ""
-        if how in ("level%",) and sid in ("DFF", "DGS10", "DGS2"):   # daily series: keep one point a week for the line
-            series = series[-260 * 2:]
+        if len(series) < 2:
+            errs.append(f"{kind}: too short")
+            continue
+        if how0 == "yoy" and how == "level%":
+            unit = "%"
         last, prev = series[-1], series[-2]
-        spark = [round(v, 3) for _, v in series[-36:]] if len(series) < 400 else [round(v, 3) for _, v in series[-520::10]] + [round(series[-1][1], 3)]
+        if len(series) > 120:                  # daily data: compare with the previous day, draw about a year
+            spark = [round(v, 3) for _, v in series[-260::5]] + [round(last[1], 3)]
+        else:
+            spark = [round(v, 3) for _, v in series[-36:]]
+        url = {"fred": f"https://fred.stlouisfed.org/series/{sid}", "fredcsv": f"https://fred.stlouisfed.org/series/{sid}", "dbn": f"https://db.nomics.world/{sid}",
+               "nyfed": "https://www.newyorkfed.org/markets/reference-rates/effr", "ust": "https://home.treasury.gov/policy-issues/financing-the-government/interest-rate-statistics",
+               "ecb": "https://data.ecb.europa.eu/", "eurostat": "https://ec.europa.eu/eurostat/databrowser/view/une_rt_m/default/table", "boe": "https://www.bankofengland.co.uk/monetary-policy/the-interest-rate-bank-rate"}[kind]
+        via = {"fred": "FRED (St. Louis Fed)", "fredcsv": "FRED (St. Louis Fed)", "dbn": "DBnomics mirror", "nyfed": "", "ust": "", "ecb": "", "eurostat": "", "boe": ""}[kind]
         return {"k": key, "id": sid, "name": name, "region": region, "group": group, "v": round(last[1], 2), "prev": round(prev[1], 2), "date": last[0], "prev_date": prev[0],
-                "unit": unit, "spark": spark, "src": src, "via": "FRED (St. Louis Fed)", "url": f"https://fred.stlouisfed.org/series/{sid}"}
-    except Exception as e:  # noqa
-        return {"k": key, "id": sid, "name": name, "region": region, "group": group, "err": str(e)[:80], "src": src}
+                "unit": unit, "spark": spark, "src": src, "via": via, "url": url, "got": kind}
+    return {"k": key, "name": name, "region": region, "group": group, "err": " | ".join(errs)[:200], "src": src}
 
 
 def upcoming_releases(now):
@@ -494,7 +585,8 @@ def macro(now):
     rows = [old.get(r["k"], r) if r.get("err") else r for r in rows]     # a source is down: keep the last good number
     bad = [r for r in rows if r.get("err")]
     if bad:
-        print(f"  macro: {len(bad)} series not available, e.g. {bad[0]['id']}: {bad[0]['err']}", flush=True)
+        print(f"  macro: {len(bad)} series not available:", "; ".join(f"{r['k']} ({r['err']})" for r in bad[:6]), flush=True)
+    print("  macro sources used:", ", ".join(f"{r['k']}={r.get('got')}" for r in rows if not r.get("err")), flush=True)
     out = {"at": int(now), "rows": rows, "calendar": upcoming_releases(now) or cache.get("calendar")}
     write(STATE / "macro.json", out)
     return out
