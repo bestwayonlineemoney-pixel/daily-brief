@@ -36,6 +36,7 @@ jobs:
       - name: Collect the news
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
         run: python collector/collect.py
       - name: Save memory for the next run
         uses: actions/cache/save@v4
@@ -50,6 +51,8 @@ jobs:
             git config user.name "daily-brief-bot"; git config user.email "actions@users.noreply.github.com"
             git add -f site/data/archive && git commit -m "Archive $(date -u +%F)" && git push || true
           fi
+      - name: Stamp this version on the page files (so browsers never mix old and new files)
+        run: sed -i "s/__V__/${GITHUB_SHA::8}-${GITHUB_RUN_NUMBER}/g" site/index.html site/sw.js
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

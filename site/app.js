@@ -398,6 +398,43 @@
   }
   function stat(v, label, key) { return el('div', { class: 'stat' }, el('b', null, cnt(v, (x) => Math.round(x).toLocaleString(), key)), el('span', { text: label })); }
 
+
+  /* ================= macro (official statistics) ================= */
+  const MACRO_HOME = ['us_cpi', 'us_core', 'us_unemp', 'us_nfp', 'us_fed', 'us_10y'];
+  function mval(x, v) { v = isNum(v) ? v : x.v; if (!isNum(v)) return '—';
+    if (x.unit === 'k') return (x.k === 'us_nfp' && v > 0 ? '+' : '') + Math.round(v).toLocaleString() + 'k';
+    if (x.unit === '%') return v.toFixed(x.group === 'Rates' ? 2 : 1) + '%'; if (x.unit === ' pts') return (v >= 0 ? '+' : '') + v.toFixed(2); return v.toFixed(1); }
+  function mdate(d) { if (!d) return ''; const t = new Date(d + 'T12:00:00'); return d.slice(8) === '01' ? t.toLocaleDateString([], { month: 'short', year: 'numeric' }) : t.toLocaleDateString([], { day: 'numeric', month: 'short' }); }
+  function mchg(x) { if (!isNum(x.v) || !isNum(x.prev)) return ''; const d = x.v - x.prev, u = x.unit === 'k' ? 'k' : x.unit === '%' || x.unit === ' pts' ? ' pts' : '';
+    const n = x.unit === 'k' ? Math.round(Math.abs(d)).toLocaleString() : Math.abs(d).toFixed(x.group === 'Rates' ? 2 : 1); return (!parseFloat(n.replace(/,/g, '')) ? '= unchanged' : (d > 0 ? '▲ ' : '▼ ') + n + u) + ' vs ' + mdate(x.prev_date); }
+  function macroTile(x) {
+    const d = sparkPath(x.spark, 0, 120, 4, 30);
+    const t = el('a', { class: 'mt mac glass spot', href: x.url || '#', target: '_blank', rel: 'noopener noreferrer', title: 'Official source: ' + x.src + (x.via ? ' · via ' + x.via : '') + ' · tap to see the full series' },
+      el('div', { class: 'mt-n' }, x.name), el('div', { class: 'mt-v' }, isNum(x.v) ? cnt(x.v, (v) => mval(x, v), 'm_' + x.k) : '—'),
+      el('div', { class: 'mt-c' }, x.err ? 'not available now' : mchg(x)), el('div', { class: 'mt-f' }, (x.region === 'United States' ? '' : x.region + ' · ') + mdate(x.date) + ' · ' + x.src));
+    if (d) { const g = svg('0 0 120 34', `<path class="draw" d="${d}" fill="none" stroke="#A5B4FC" stroke-width="1.6" stroke-linejoin="round" pathLength="1"/>`); g.setAttribute('preserveAspectRatio', 'none'); g.classList.add('mt-s'); t.append(g); }
+    return t;
+  }
+  function calBox(cal) {
+    if (!cal || !cal.length) return null;
+    const by = {}; cal.forEach((r) => { (by[r.date] = by[r.date] || []).push(r.name); });
+    return el('div', { class: 'cal glass' }, Object.entries(by).slice(0, 6).map(([d, L]) => el('div', { class: 'cal-d' },
+      el('div', { class: 'cal-day' }, el('b', { text: new Date(d + 'T12:00:00').toLocaleDateString([], { weekday: 'short' }) }), el('span', { text: new Date(d + 'T12:00:00').toLocaleDateString([], { day: 'numeric', month: 'short' }) })),
+      el('ul', null, L.slice(0, 5).map((n) => el('li', { text: n }))))));
+  }
+  function viewMacro(M) {
+    const rows = (D.macro || []).filter((x) => isNum(x.v));
+    M.append(el('section', { class: 'chero', style: { '--c': '#A5B4FC' } }, rv(el('div', { class: 'eyebrow' }, el('span', { class: 'ci', text: '∿' }), 'Official statistics'), 0),
+      rv(el('h1', { class: 'grad-c', text: 'Macro' }), 1),
+      rv(el('p', { class: 'lede', text: 'The latest official numbers on inflation, jobs, interest rates and growth, straight from the statistics offices and central banks. Each one shows the newest release, the change from the one before, and its source.' }), 2)));
+    if (D.calendar && D.calendar.length) M.append(sec('Coming up', { eyebrow: 'Release calendar', sub: 'Official US data due in the next week' }, calBox(D.calendar)));
+    if (!rows.length) { M.append(el('div', { class: 'empty glass', text: 'The macro numbers appear after the next update.' })); return; }
+    ['United States', 'Euro area', 'United Kingdom', 'Japan'].forEach((rg) => { const L = rows.filter((x) => x.region === rg); if (!L.length) return;
+      const groups = ['Inflation', 'Jobs', 'Rates', 'Growth'].map((g) => [g, L.filter((x) => x.group === g)]).filter(([, l]) => l.length);
+      M.append(sec(rg, { eyebrow: rg === 'United States' ? 'The biggest economy' : 'Region' }, groups.map(([g, l]) => el('div', { class: 'mgrp' }, el('div', { class: 'grp-h', style: { '--c': '#A5B4FC' } }, el('i'), g),
+        el('div', { class: 'mts' }, l.map((x, i) => rv(macroTile(x), i))))))); });
+  }
+
   /* ================= the overview page ================= */
   function greet() { const h = new Date().getHours(); return h < 5 ? 'Good night' : h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'; }
   function viewHome(M) {
@@ -426,6 +463,10 @@
     const ms = order.map((k) => MK[k]).filter((m) => m && isNum(m.p));
     if (ms.length) M.append(sec('Market pulse', { cls: 'pulse', eyebrow: 'Numbers', sub: sinceMode() && snapPrev ? 'Change today · tap a chapter for more' : 'Change today', more: el('span', { class: 'fine', text: 'For the big picture, not trading' }) },
       el('div', { class: 'mts' }, ms.map((m, i) => rv(tile(m, false, 'today'), i)), D.fng ? rv(fngGauge(D.fng), ms.length) : null)));
+    /* macro snapshot */
+    const mh = MACRO_HOME.map((k) => (D.macro || []).find((x) => x.k === k)).filter((x) => x && isNum(x.v));
+    if (mh.length) M.append(sec('Macro snapshot', { eyebrow: 'Official statistics', sub: 'Latest releases from the BLS, BEA, Federal Reserve and ECB', more: el('button', { class: 'btn ghost sm', onclick: () => go('macro'), text: 'All macro →' }) },
+      el('div', { class: 'mts' }, mh.map((x, i) => rv(macroTile(x), i))), calBox((D.calendar || []).slice(0, 8))));
     /* while you were away */
     const shown = new Set();
     if (sinceMode()) {
@@ -468,6 +509,7 @@
       rv(el('h1', { class: 'grad-c', text: cname(c) }), 1),
       rv(el('p', { class: 'lede', text: Ls.length ? `${Ls.length} confirmed ${Ls.length === 1 ? 'story' : 'stories'} in the last 24 hours, each reported by two or more newsrooms or an official source.` : 'No confirmed stories in the last 24 hours yet.' }), 2),
       ms.length ? rv(el('div', { class: 'mts' }, ms.map((m) => tile(m, true, 'today')), c === 'crypto' && D.fng ? fngGauge(D.fng) : null), 3) : null,
+      c === 'economy' && (D.macro || []).some((x) => isNum(x.v)) ? rv(el('div', { class: 'mts', style: { marginTop: '12px' } }, ['us_cpi', 'us_unemp', 'us_fed', 'us_gdp'].map((k) => (D.macro || []).find((x) => x.k === k)).filter((x) => x && isNum(x.v)).map(macroTile)), 3) : null,
       Ls.length ? rv(el('div', { class: 'cta' }, el('button', { class: 'btn grad-btn', onclick: () => openBrief(c) }, el('span', { class: 'play' }, '▶'), 'Play this chapter')), 4) : null));
     if (!Ls.length) return;
     const [first, ...rest] = Ls;
@@ -491,7 +533,7 @@
   function renderChapters() {
     const nav = clear($('nav'));
     const b = (k, label, c) => el('button', { class: view === k && !query ? 'on' : '', style: c ? { '--c': c } : null, onclick: () => go(k) }, c ? el('i') : null, label);
-    nav.append(b('front', 'Overview', null));
+    nav.append(b('front', 'Overview', null)); if ((D.macro || []).length) nav.append(b('macro', 'Macro', '#A5B4FC'));
     CATS.forEach((c) => { if (storiesOf(c).length) nav.append(b(c, SHORT[c], cv(c))); });
     if (Object.keys(stars).length) nav.append(b('saved', '☆ Saved', null));
     const on = nav.querySelector('.on'); if (on) requestAnimationFrame(() => { const l = on.offsetLeft - nav.clientWidth / 2 + on.clientWidth / 2; nav.scrollTo({ left: l, behavior: still ? 'auto' : 'smooth' }); });
@@ -524,6 +566,7 @@
     else if (view === 'front') viewHome(M);
     else if (CATS.includes(view)) viewCat(M, view);
     else if (view === 'saved') viewSaved(M);
+    else if (view === 'macro') viewMacro(M);
     else { view = 'front'; viewHome(M); }
     renderFoot();
   }

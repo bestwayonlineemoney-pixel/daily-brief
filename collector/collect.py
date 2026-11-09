@@ -389,6 +389,114 @@ def markets():
     return out, fng
 
 
+# ---------------- macro numbers (official statistics via the St. Louis Fed's FRED) ----------------
+# (key, FRED series, name, region, group, how to show it, original source)
+MACRO = [
+    ("us_cpi", "CPIAUCSL", "Inflation (CPI)", "United States", "Inflation", "yoy", "US BLS"),
+    ("us_core", "CPILFESL", "Core inflation", "United States", "Inflation", "yoy", "US BLS"),
+    ("us_pce", "PCEPILFE", "Core PCE (Fed's gauge)", "United States", "Inflation", "yoy", "US BEA"),
+    ("us_unemp", "UNRATE", "Unemployment rate", "United States", "Jobs", "level%", "US BLS"),
+    ("us_nfp", "PAYEMS", "Jobs added (payrolls)", "United States", "Jobs", "diffk", "US BLS"),
+    ("us_claims", "ICSA", "Weekly jobless claims", "United States", "Jobs", "levelk", "US Dept. of Labor"),
+    ("us_fed", "DFF", "Fed funds rate", "United States", "Rates", "level%", "Federal Reserve"),
+    ("us_10y", "DGS10", "10-year Treasury yield", "United States", "Rates", "level%", "US Treasury"),
+    ("us_2y", "DGS2", "2-year Treasury yield", "United States", "Rates", "level%", "US Treasury"),
+    ("us_curve", "T10Y2Y", "Yield curve (10y − 2y)", "United States", "Rates", "levelpt", "Federal Reserve"),
+    ("us_gdp", "A191RL1Q225SBEA", "GDP growth (annualised)", "United States", "Growth", "level%", "US BEA"),
+    ("us_retail", "RSAFS", "Retail sales (month)", "United States", "Growth", "mom", "US Census Bureau"),
+    ("us_sent", "UMCSENT", "Consumer sentiment", "United States", "Growth", "level", "Univ. of Michigan"),
+    ("ea_rate", "ECBDFR", "ECB deposit rate", "Euro area", "Rates", "level%", "ECB"),
+    ("ea_cpi", "CP0000EZ19M086NEST", "Inflation (HICP)", "Euro area", "Inflation", "yoy", "Eurostat"),
+    ("ea_unemp", "LRHUTTTTEZM156S", "Unemployment rate", "Euro area", "Jobs", "level%", "OECD / Eurostat"),
+    ("uk_rate", "BOERUKM", "Bank of England rate", "United Kingdom", "Rates", "level%", "Bank of England"),
+    ("uk_cpi", "GBRCPIALLMINMEI", "Inflation (CPI)", "United Kingdom", "Inflation", "yoy", "ONS via OECD"),
+    ("jp_cpi", "JPNCPIALLMINMEI", "Inflation (CPI)", "Japan", "Inflation", "yoy", "Statistics Japan via OECD"),
+]
+IMPORTANT_RELEASES = re.compile(r"consumer price index|employment situation|gross domestic product|personal income|producer price|retail|"
+                                r"jobless|unemployment insurance|job openings|fomc|h\.15|industrial production|housing starts|consumer sentiment|durable goods", re.I)
+
+
+def fred_csv(series, start):
+    raw = get(f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series}&cosd={start}", timeout=25).decode("utf-8", "replace")
+    rows = []
+    for line in raw.strip().splitlines()[1:]:
+        parts = line.split(",")
+        if len(parts) >= 2 and parts[1] not in (".", ""):
+            try:
+                rows.append((parts[0], float(parts[1])))
+            except ValueError:
+                pass
+    return rows
+
+
+def macro_one(spec):
+    key, sid, name, region, group, how, src = spec
+    try:
+        rows = fred_csv(sid, (datetime.now(timezone.utc) - timedelta(days=365 * 4)).strftime("%Y-%m-%d"))
+        if len(rows) < 3:
+            raise ValueError("no data")
+        dates, vals = [r[0] for r in rows], [r[1] for r in rows]
+        if how == "yoy":                       # index -> % change on a year earlier
+            step = 12 if len(dates) > 13 and dates[-1][5:7] != dates[-2][5:7] else 4
+            series = [(dates[i], (vals[i] / vals[i - step] - 1) * 100) for i in range(step, len(vals))]
+            unit = "%"
+        elif how == "mom":
+            series = [(dates[i], (vals[i] / vals[i - 1] - 1) * 100) for i in range(1, len(vals))]
+            unit = "%"
+        elif how == "diffk":                   # thousands of jobs added in the month
+            series = [(dates[i], vals[i] - vals[i - 1]) for i in range(1, len(vals))]
+            unit = "k"
+        elif how == "levelk":
+            series = [(d, v / 1000) for d, v in zip(dates, vals)]
+            unit = "k"
+        else:
+            series = list(zip(dates, vals))
+            unit = "%" if how == "level%" else " pts" if how == "levelpt" else ""
+        if how in ("level%",) and sid in ("DFF", "DGS10", "DGS2"):   # daily series: keep one point a week for the line
+            series = series[-260 * 2:]
+        last, prev = series[-1], series[-2]
+        spark = [round(v, 3) for _, v in series[-36:]] if len(series) < 400 else [round(v, 3) for _, v in series[-520::10]] + [round(series[-1][1], 3)]
+        return {"k": key, "id": sid, "name": name, "region": region, "group": group, "v": round(last[1], 2), "prev": round(prev[1], 2), "date": last[0], "prev_date": prev[0],
+                "unit": unit, "spark": spark, "src": src, "via": "FRED (St. Louis Fed)", "url": f"https://fred.stlouisfed.org/series/{sid}"}
+    except Exception as e:  # noqa
+        return {"k": key, "id": sid, "name": name, "region": region, "group": group, "err": str(e)[:80], "src": src}
+
+
+def upcoming_releases(now):
+    key = os.environ.get("FRED_API_KEY", "").strip()
+    if not key:
+        return None
+    a = datetime.fromtimestamp(now, timezone.utc).strftime("%Y-%m-%d")
+    b = (datetime.fromtimestamp(now, timezone.utc) + timedelta(days=8)).strftime("%Y-%m-%d")
+    try:
+        j = get_json(f"https://api.stlouisfed.org/fred/releases/dates?api_key={key}&file_type=json&realtime_start={a}&realtime_end={b}"
+                     f"&include_release_dates_with_no_data=true&sort_order=asc&limit=1000", timeout=25)
+        out, seen = [], set()
+        for r in j.get("release_dates", []):
+            n = r.get("release_name", "")
+            if IMPORTANT_RELEASES.search(n) and (n, r["date"]) not in seen:
+                seen.add((n, r["date"]))
+                out.append({"name": n, "date": r["date"]})
+        return out[:30]
+    except Exception as e:  # noqa
+        print("  release calendar skipped:", str(e)[:100])
+        return None
+
+
+def macro(now):
+    """Official statistics change monthly or weekly, so fetch them at most every 3 hours."""
+    cache = read(STATE / "macro.json", {})
+    if cache.get("at", 0) > now - 3 * 3600 and cache.get("rows"):
+        return cache
+    with ThreadPoolExecutor(6) as ex:
+        rows = list(ex.map(macro_one, MACRO))
+    old = {r["k"]: r for r in cache.get("rows", []) if not r.get("err")}
+    rows = [old.get(r["k"], r) if r.get("err") else r for r in rows]     # a source is down: keep the last good number
+    out = {"at": int(now), "rows": rows, "calendar": upcoming_releases(now) or cache.get("calendar")}
+    write(STATE / "macro.json", out)
+    return out
+
+
 # ---------------- the day in 60 seconds ----------------
 def ai_brief(top, conf):
     key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
@@ -485,6 +593,7 @@ def run(verbose=True):
             pulse[v["cat"]][i] += 1
 
     mk, fng = markets()
+    mac = macro(now)
 
     # summary: AI when a key is set (refreshed at most every 45 min or when the top changes), otherwise built from the top stories
     prev = read(DATA / "today.json", {})
@@ -511,7 +620,7 @@ def run(verbose=True):
            "stories": final, "top": top, "counts": {k: len(by[k]) for k in CATS}, "total": len(day), "unconfirmed_hidden": unconfirmed if conf.get("verified_only", True) else 0,
            "rule": "Shown only when 2+ independent newsrooms report it, or it comes from an official source",
            "outlets": len({o for s in day for o in s["orgs"]}), "reports": sum(len(s["reports"]) for s in day),
-           "brief": brief, "markets": mk, "fng": fng, "pulse": {"start": h0, "cats": pulse},
+           "brief": brief, "markets": mk, "fng": fng, "macro": mac.get("rows", []), "calendar": mac.get("calendar"), "pulse": {"start": h0, "cats": pulse},
            "feeds": {"ok": ok, "total": len(feeds), "list": health}}
     write(DATA / "today.json", out)
 

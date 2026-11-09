@@ -5,6 +5,7 @@ The whole day, sorted and easy to read. Every few minutes it reads about 90 news
 - shows **only confirmed news**: a story appears only when 2 or more independent newsrooms report it, or when it comes straight from an official source. Single-source reports are kept out, and sites that mostly republish others never count as a confirmation. Crypto prices are checked against a second source
 - opens with **While you were away**: what's new and what's been updated since your last visit, plus how prices moved since then
 - sorts everything into chapters (World, War, Economy & stocks, Forex, Commodities, Energy, Crypto, your home region, Tech & AI, Science, Sport), each split into sub-topics such as Oil / Gas & LNG / Power, or Bitcoin / ETFs & regulators / Hacks
+- has a **Macro** page with the latest official numbers (inflation, jobs, interest rates, growth for the US, euro area, UK and Japan) straight from the BLS, BEA, Federal Reserve, Treasury, ECB and others via the St. Louis Fed's FRED, plus an optional calendar of upcoming releases
 - has a **5-minute brief**: a full-screen, swipe-through version of the day, one story per screen and chapter by chapter
 - shows each story's one-line teaser from the outlet, every report in order, and a picture drawn from data (a globe with the place marked, a price chart and so on; no news photos)
 - has a dark glass design with smooth animations, a live 3D globe and a bento layout
@@ -37,6 +38,10 @@ Without a key, the app shows the top story from each area. With a key, an AI wri
 - **On GitHub:** go to **Settings → Secrets and variables → Actions → New repository secret**. Name it `ANTHROPIC_API_KEY`.
 
 To get the summary in another language, set `"summary_language"` in `config.json`, for example `"Sinhala"`. Never paste the key into a chat or put it in any other file.
+
+## Optional: release calendar ("Coming up")
+
+The macro numbers work without a key. To also see which official US data is due in the next week, get a free key at fred.stlouisfed.org (My Account → API Keys). On GitHub, add it as a repository secret named `FRED_API_KEY`; on your PC, put `FRED_API_KEY=...` in `brief.env`.
 
 ## Change sources or your region
 
