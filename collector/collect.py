@@ -694,7 +694,7 @@ def run(verbose=True):
 
     mk, fng = markets()
     mac = macro(now)
-    trader.setup(get, get_json, read, write, STATE)
+    trader.setup(get, get_json, read, write, STATE, ARCH)
     try:
         tr = trader.run(day, final, mk, fng, mac.get("calendar"), conf.get("watchlist_default", []), now)
     except Exception as e:  # noqa  - the trader layer must never stop the news

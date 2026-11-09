@@ -617,6 +617,49 @@
     return sec('Where it\'s happening', { eyebrow: 'World map', sub: 'Places named in today\'s confirmed stories' }, el('div', { class: 'gl-wrap' }, rv(G, 0), rv(list, 1)));
   }
 
+
+  /* ================= key events log (kept for 120 days) ================= */
+  let LOG = null, LOGF = { cat: 'all', min: 7 };
+  const LOGBY = {};
+  async function loadLog() { try { LOG = await getJSON('data/archive/keylog.json'); (LOG.events || []).forEach((e) => { LOGBY[e.id] = e; }); } catch (e) { LOG = { events: [] }; } return LOG; }
+  function reaction(e) {
+    const pick = (e.assets || []).map((a) => ({ BTC: 'btc', ETH: 'eth', SOL: 'sol', GOLD: 'gold', OIL: 'oil', SPX: 'spx', DXY: 'dxy' }[a])).filter(Boolean);
+    const keys = [...new Set(pick.concat(['btc']))].slice(0, 3);
+    return keys.map((k) => { const then = (e.px || {})[k], m = MK[k]; if (!isNum(then) || !m || !isNum(m.p)) return null; const ch = (m.p / then - 1) * 100;
+      return el('span', { class: 'rx ' + (ch >= 0 ? 'u' : 'd'), title: m.name + ': ' + fmtP(m, then) + ' when this broke, ' + fmtP(m) + ' now' }, el('b', { text: m.name.replace(' oil', '').replace(' index', '') }),
+        fmtP(m, then) + ' → ' + fmtP(m), el('em', { text: ' ' + (ch >= 0 ? '+' : '') + ch.toFixed(2) + '%' })); }).filter(Boolean);
+  }
+  function logCard(e) {
+    const a = act(el('article', { class: 'lg glass spot', style: { '--c': cv(e.cat) } }), e.id);
+    a.append(el('div', { class: 'lg-t' }, el('b', { text: hm(e.first) }), el('span', { text: dshort(e.first) })),
+      el('div', { class: 'lg-b' }, el('div', { class: 'kick' }, el('span', { class: 'kc', style: { '--c': cv(e.cat) } }, el('i'), SHORT[e.cat] || e.cat),
+        e.status === 'OFFICIAL' ? el('span', { class: 'vb o' }, el('i', { text: '◆' }), 'Official source') : el('span', { class: 'vb v' }, el('i', { text: '✓' }), 'Confirmed · ' + e.n + ' newsrooms'),
+        e.reason === 'breaking' ? el('span', { class: 'tag brk', text: 'Was breaking' }) : null),
+        el('h3', { text: e.title }), sigRow(e), e.why ? el('p', { class: 'dek', text: e.why }) : null,
+        reaction(e).length ? el('div', { class: 'rxs' }, el('span', { class: 'rx-l', text: 'Since it broke' }), reaction(e)) : null,
+        el('div', { class: 'srcs', text: (e.indep && e.indep.length ? e.indep : e.orgs || []).slice(0, 5).join(' · ') })));
+    return a;
+  }
+  function viewLog(M) {
+    M.append(el('section', { class: 'chero', style: { '--c': '#F472B6' } }, rv(el('div', { class: 'eyebrow' }, el('span', { class: 'ci', text: '◉' }), 'Saved automatically'), 0),
+      rv(el('h1', { class: 'grad-c', text: 'Key events' }), 1),
+      rv(el('p', { class: 'lede', text: 'Every high-impact story is saved here the moment it breaks and stays for 120 days, even after newer news pushes it off the front page. Each one shows what prices were when it broke and where they are now.' }), 2)));
+    const box = el('div', { class: 'sec first' }); M.append(box);
+    const draw = () => {
+      clear(box); const E = (LOG && LOG.events) || [];
+      const cats = ['all', ...CATS.filter((c) => E.some((e) => e.cat === c))];
+      box.append(el('div', { class: 'lg-f' }, el('div', { class: 'chips' }, cats.map((c) => el('button', { class: LOGF.cat === c ? 'on' : '', style: c !== 'all' ? { '--c': cv(c) } : null, onclick: () => { LOGF.cat = c; draw(); } }, c !== 'all' ? el('i') : null, c === 'all' ? 'All' : SHORT[c]))),
+        el('div', { class: 'chips' }, [6, 7, 8, 9].map((v) => el('button', { class: LOGF.min === v ? 'on' : '', onclick: () => { LOGF.min = v; draw(); } }, '⚡ ' + v + '+')))));
+      const L = E.filter((e) => (LOGF.cat === 'all' || e.cat === LOGF.cat) && (e.impact >= LOGF.min || e.reason === 'breaking'));
+      if (!L.length) { box.append(el('div', { class: 'empty glass', text: E.length ? 'Nothing at this level yet. Try a lower impact filter.' : 'The log fills itself as high-impact stories arrive.' })); return; }
+      const days = {}; L.forEach((e) => { const k = new Date(e.first * 1000).toDateString(); (days[k] = days[k] || []).push(e); });
+      Object.entries(days).forEach(([k, list], i) => { const d = new Date(k), today = new Date().toDateString(), yest = new Date(Date.now() - 86400000).toDateString();
+        box.append(rv(el('div', { class: 'lg-day' }, el('div', { class: 'lg-dh' }, el('b', { text: k === today ? 'Today' : k === yest ? 'Yesterday' : d.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' }) }), el('span', { text: list.length + (list.length > 1 ? ' events' : ' event') })),
+          el('div', { class: 'lg-list' }, list.map(logCard))), i)); });
+    };
+    if (LOG) draw(); else { box.append(el('div', { class: 'empty glass', text: 'Loading…' })); loadLog().then(() => { if (view === 'log') draw(); }); }
+  }
+
   /* ================= the overview page ================= */
   function greet() { const h = new Date().getHours(); return h < 5 ? 'Good night' : h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'; }
   function viewHome(M) {
@@ -726,7 +769,7 @@
   function renderChapters() {
     const nav = clear($('nav'));
     const b = (k, label, c) => el('button', { class: view === k && !query ? 'on' : '', style: c ? { '--c': c } : null, onclick: () => go(k) }, c ? el('i') : null, label);
-    nav.append(b('front', 'Overview', null)); if ((D.macro || []).length) nav.append(b('macro', 'Macro', '#A5B4FC'));
+    nav.append(b('front', 'Overview', null), b('log', '◉ Key events', '#F472B6')); if ((D.macro || []).length) nav.append(b('macro', 'Macro', '#A5B4FC'));
     CATS.forEach((c) => { if (storiesOf(c).length) nav.append(b(c, SHORT[c], cv(c))); });
     if (Object.keys(stars).length) nav.append(b('saved', '☆ Saved', null));
     const on = nav.querySelector('.on'); if (on) requestAnimationFrame(() => { const l = on.offsetLeft - nav.clientWidth / 2 + on.clientWidth / 2; nav.scrollTo({ left: l, behavior: still ? 'auto' : 'smooth' }); });
@@ -761,6 +804,7 @@
     else if (CATS.includes(view)) viewCat(M, view);
     else if (view === 'saved') viewSaved(M);
     else if (view === 'macro') viewMacro(M);
+    else if (view === 'log') viewLog(M);
     else { view = 'front'; viewHome(M); }
     renderFoot();
   }
@@ -773,7 +817,7 @@
       e.currentTarget.classList.toggle('on', !!stars[s.id]); e.currentTarget.textContent = stars[s.id] ? '★ Saved' : '☆ Save'; renderChapters(); }, text: stars[s.id] ? '★ Saved' : '☆ Save' });
   }
   function openStory(id) {
-    const s = BYID[id] || stars[id]; if (!s) return; markSeen(s.id);
+    const s = BYID[id] || stars[id] || LOGBY[id]; if (!s) return; markSeen(s.id); s.reports = s.reports || []; s.orgs = s.orgs || [];
     history.replaceState(null, '', '#s=' + id);
     openDrawer((p) => {
       p.append(el('div', { class: 'dr-art' }, artFor(s, true)), el('button', { class: 'ib dr-x', onclick: closeDrawer, 'aria-label': 'Close', text: '✕' }));

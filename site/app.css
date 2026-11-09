@@ -423,3 +423,18 @@ main.swap{animation:swap .5s var(--ease)}@keyframes swap{from{opacity:.4}to{opac
 @media(max-width:1120px){.hero.trader{grid-template-columns:1fr}.dcs,.nts{grid-template-columns:repeat(2,minmax(0,1fr))}.gl-wrap{grid-template-columns:1fr}}
 @media(max-width:720px){.dcs,.nts{grid-template-columns:1fr}.cc-chart{height:230px}.cc-p{font-size:24px}.rs span{font-size:11px}.hero.trader .grad{font-size:40px}
   .cc-tabs button{padding:5px 9px}.cm{grid-template-columns:52px 70px 1fr;gap:6px}}
+
+/* key events log */
+.lg-f{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:10px}
+.chips button.on{background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.35);color:#fff}
+.lg-day{margin-top:30px}.lg-dh{display:flex;align-items:baseline;gap:12px;padding-bottom:10px;border-bottom:1px solid var(--edge);margin-bottom:12px}
+.lg-dh b{font:700 20px var(--sans);letter-spacing:-.02em}.lg-dh span{font-size:13px;color:var(--mut)}
+.lg-list{display:flex;flex-direction:column;gap:12px;position:relative}
+.lg{display:grid;grid-template-columns:82px 1fr;gap:18px;padding:16px 20px;cursor:pointer;border-left:3px solid var(--c);transition:transform .3s var(--ease)}
+.lg:hover{transform:translateX(3px)}
+.lg-t b{display:block;font:700 15px var(--mono);color:#fff}.lg-t span{font-size:12px;color:var(--mut)}
+.lg h3{margin:7px 0 0;font:600 17.5px/1.38 var(--sans);letter-spacing:-.015em}.lg .dek{margin:6px 0 0;font-size:14px;color:var(--ink2);line-height:1.5}
+.rxs{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:10px}.rx-l{font:700 10.5px var(--sans);letter-spacing:.1em;text-transform:uppercase;color:var(--faint);margin-right:2px}
+.rx{display:inline-flex;align-items:baseline;gap:6px;font:500 12px var(--mono);color:var(--ink2);padding:4px 9px;border-radius:8px;background:rgba(255,255,255,.04);border:1px solid var(--edge)}
+.rx b{font:700 11px var(--sans);color:var(--mut)}.rx em{font-style:normal;font-weight:700}.rx.u em{color:var(--up)}.rx.d em{color:var(--down)}
+@media(max-width:720px){.lg{grid-template-columns:1fr;gap:6px}.lg-t{display:flex;gap:8px;align-items:baseline}}

@@ -21,8 +21,8 @@ from datetime import datetime, timedelta, timezone
 NET = {}
 
 
-def setup(get, get_json, read, write, state):
-    NET.update(get=get, get_json=get_json, read=read, write=write, state=state)
+def setup(get, get_json, read, write, state, arch=None):
+    NET.update(get=get, get_json=get_json, read=read, write=write, state=state, arch=arch)
 
 
 def _get(url, **kw):
@@ -515,6 +515,34 @@ def alerts(stories, watch, btc_price, now):
     return n
 
 
+# ---------------- key events log (kept for 120 days, never pushed out by newer news) ----------------
+LOG_KEYS = ["btc", "eth", "sol", "gold", "oil", "spx", "dxy"]
+
+
+def keylog(stories, driver_ids, mk, now):
+    path = NET["arch"] / "keylog.json"
+    log = NET["read"](path, {"events": []})
+    by = {e["id"]: e for e in log.get("events", [])}
+    px = {m["k"]: m["p"] for m in mk if m.get("p") is not None and m["k"] in LOG_KEYS}
+    added = 0
+    for s in stories:
+        qualifies = s.get("impact", 0) >= 7 or s.get("breaking") or s["id"] in driver_ids or (s.get("status") == "OFFICIAL" and s.get("impact", 0) >= 6)
+        e = by.get(s["id"])
+        if not e and not qualifies:
+            continue
+        reps = [{"o": r["o"], "t": r["t"], "u": r["u"], "ts": r["ts"]} for r in s.get("reports", [])][-8:]
+        if not e:
+            e = {"id": s["id"], "logged": int(now), "first": s["first"], "px": px, "reason": "breaking" if s.get("breaking") else "driver" if s["id"] in driver_ids and s.get("impact", 0) < 7 else "impact"}
+            by[s["id"]] = e
+            added += 1
+        e.update(title=s["title"], dek=s.get("dek", ""), link=s["link"], cat=s["cat"], status=s["status"], n=max(e.get("n", 0), s.get("n", 1)), orgs=s.get("orgs", []),
+                 indep=s.get("indep", []), sentiment=s.get("sentiment"), impact=max(e.get("impact", 0), s.get("impact", 0)), assets=s.get("assets", []), why=s.get("why", ""),
+                 last=s["last"], places=s.get("places", []), kw=s.get("kw", []), reports=reps)
+    events = sorted((e for e in by.values() if e["logged"] >= now - 120 * 86400), key=lambda e: -e["first"])[:3000]
+    NET["write"](path, {"updated": int(now), "events": events})
+    return added
+
+
 def run(day_stories, final_stories, mk, fng, calendar, watch, now):
     """Enrich stories in place and return the trader block for today.json."""
     for s in final_stories:
@@ -527,11 +555,13 @@ def run(day_stories, final_stories, mk, fng, calendar, watch, now):
     out = {"regime": regime(mk, fng), "drivers": drivers(final_stories, now), "narratives": narratives(final_stories, now), "catalysts": cat,
            "derivatives": der, "events": events(final_stories, calendar, now), "ai_tags": ai}
     out["alerts_sent"] = alerts(final_stories, watch, prices.get("BTC"), now)
+    if NET.get("arch"):
+        out["logged"] = keylog(final_stories, out["drivers"], mk, now)
     srcs = {v.get("src") for v in der.values() if isinstance(v, dict) and v.get("src")}
     cs = ",".join(k + "=" + str(v["src"]) for k, v in cat.items()) or "none"
     print(f"  trader: candles {cs} · derivatives {','.join(sorted(srcs)) or 'none'}"
           f" · L/S {','.join(sorted({v.get('ls_src', '-') for v in der.values() if isinstance(v, dict)}))} · regime {out['regime']['label']}"
-          f" · events {len(out['events']['upcoming'])} upcoming · alerts {out['alerts_sent']}", flush=True)
+          f" · events {len(out['events']['upcoming'])} upcoming · alerts {out['alerts_sent']} · key events +{out.get('logged', 0)}", flush=True)
     errs = {k: v["err"] for k, v in der.items() if isinstance(v, dict) and v.get("err")}
     if errs:
         print("  derivatives errors:", errs, flush=True)
