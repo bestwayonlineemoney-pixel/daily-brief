@@ -163,14 +163,16 @@
       ctx.beginPath(); FEATS.forEach((f) => path(f)); ctx.fillStyle = '#3a4459'; ctx.fill();
       feats.forEach((f) => { const o = hotC[f.properties.name]; ctx.beginPath(); path(f); ctx.globalAlpha = Math.min(.85, .3 + o.n * .08); ctx.fillStyle = col(o.cat); ctx.fill(); ctx.globalAlpha = 1; });
       ctx.beginPath(); path(MESH); ctx.strokeStyle = 'rgba(12,16,28,.85)'; ctx.lineWidth = .6; ctx.stroke();
-      const ph = (t % 2400) / 2400; let labels = 0;
+      const ph = (t % 2400) / 2400; let labels = 0; const placed = [], jobs = [];
       P.forEach((p, i) => { if (!vis(p.ll)) { p.xy = null; return; } const [x, y] = proj(p.ll); p.xy = [x, y]; const c = col(p.cat), r0 = 3.5 + Math.sqrt(p.n) * 2.6; p.r = r0;
         ctx.beginPath(); ctx.arc(x, y, r0 + ph * 22, 0, 7); ctx.strokeStyle = c; ctx.globalAlpha = (1 - ph) * .7; ctx.lineWidth = 2; ctx.stroke(); ctx.globalAlpha = 1;
         ctx.beginPath(); ctx.arc(x, y, r0 + 3, 0, 7); ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fill();
         ctx.beginPath(); ctx.arc(x, y, r0, 0, 7); ctx.fillStyle = c; ctx.fill();
         ctx.beginPath(); ctx.arc(x, y, r0 * .4, 0, 7); ctx.fillStyle = '#fff'; ctx.fill();
-        if ((i < 5 || p === hover) && labels < 6) { labels++; ctx.font = '600 12px "JetBrains Mono",monospace'; const tw = ctx.measureText(p.label.toUpperCase()).width;
-          const lx = x + r0 + 6 + tw + 12 > W - 4 ? x - r0 - 6 - tw - 12 : x + r0 + 6; ctx.fillStyle = 'rgba(10,10,12,.78)'; ctx.fillRect(lx, y - 10, tw + 12, 20); ctx.fillStyle = '#fff'; ctx.fillText(p.label.toUpperCase(), lx + 6, y + 4); } });
+        if ((i < 5 || p === hover) && labels < 6) { labels++; jobs.push([p, x, y, r0]); } });
+      jobs.forEach(([p, x, y, r0]) => { ctx.font = '600 12px "JetBrains Mono",monospace'; const tw = ctx.measureText(p.label.toUpperCase()).width;
+          const lx = x + r0 + 6 + tw + 12 > W - 4 ? x - r0 - 6 - tw - 12 : x + r0 + 6, box = [lx - 2, y - 12, lx + tw + 14, y + 12];
+          if (!placed.some((q) => box[0] < q[2] && box[2] > q[0] && box[1] < q[3] && box[3] > q[1])) { placed.push(box); ctx.fillStyle = 'rgba(10,10,12,.82)'; ctx.fillRect(lx, y - 10, tw + 12, 20); ctx.fillStyle = '#fff'; ctx.fillText(p.label.toUpperCase(), lx + 6, y + 4); } });
       ctx.beginPath(); path({ type: 'Sphere' }); ctx.strokeStyle = 'rgba(255,255,255,.14)'; ctx.lineWidth = 1.2; ctx.stroke();
     }
     function loop(t) { raf = requestAnimationFrame(loop); if (document.hidden || !visible || t - last < 33) return; const dt = Math.min(100, t - last); last = t;
@@ -196,14 +198,6 @@
     return P;
   }
 
-  /* the map is simplified for speed: drop broken tiny rings and make every outline wind the way d3 expects */
-  function fixShape(f) {
-    const g = f.geometry; if (!g) return null;
-    const polys = (g.type === 'Polygon' ? [g.coordinates] : g.type === 'MultiPolygon' ? g.coordinates : []).map((p) => p[0]).filter((r) => r && r.length >= 4)
-      .map((r) => d3.geoArea({ type: 'Polygon', coordinates: [r] }) > 2 * Math.PI ? r.slice().reverse() : r).map((r) => [r]);
-    if (!polys.length) return null;
-    return { type: 'Feature', id: f.id, properties: f.properties, geometry: { type: 'MultiPolygon', coordinates: polys } };
-  }
   /* ================= topics ================= */
   const CATS = ['world', 'war', 'economy', 'forex', 'commodities', 'energy', 'crypto', 'home', 'tech', 'science', 'sport'];
   const CAT = { world: 'World', war: 'War & conflict', economy: 'Economy & stocks', forex: 'Forex', commodities: 'Commodities', energy: 'Energy',
@@ -695,11 +689,13 @@
 
   /* ================= start ================= */
   async function start() {
-    const mapP = fetch('vendor/world-lite.json').then((r) => r.json()).then((t) => { TOPO = t; const fc = topojson.feature(t, t.objects.countries); FEATS = fc.features.filter((f) => f.properties.name !== 'Antarctica').map(fixShape).filter(Boolean);
-      FEATS.forEach((f) => { CENT[f.properties.name] = CENT_FIX[f.properties.name] || d3.geoCentroid(f); }); MESH = topojson.mesh(t, t.objects.countries, (a, b) => a !== b); }).catch(() => {});
+    /* world-atlas 110m: the standard map for d3 globes (outlines stay correct at every angle); centres of all 241 countries come from the detailed map */
+    const centP = fetch('vendor/countries.json').then((r) => r.json()).then((c) => { Object.entries(c).forEach(([n, ll]) => { CENT[n] = CENT_FIX[n] || ll; }); }).catch(() => {});
+    const mapP = fetch('vendor/world-110m.json').then((r) => r.json()).then((t) => { TOPO = t; FEATS = topojson.feature(t, t.objects.countries).features.filter((f) => f.properties.name !== 'Antarctica');
+      FEATS.forEach((f) => { if (!CENT[f.properties.name]) CENT[f.properties.name] = CENT_FIX[f.properties.name] || d3.geoCentroid(f); }); MESH = topojson.mesh(t, t.objects.countries, (a, b) => a !== b); }).catch(() => {});
     let tries = 0;
     for (;;) { try { LIVE = await getJSON('data/today.json'); break; } catch (e) { if (tries++ === 0) { D = prepare({ stories: [] }); render(); } await new Promise((r) => setTimeout(r, 8000)); } }
-    await mapP; D = prepare(LIVE);
+    await Promise.all([mapP, centP]); D = prepare(LIVE);
     try { DAYS = (await getJSON('data/archive/index.json')).days || []; } catch (e) { DAYS = []; }
     render();
     const h = location.hash; if (h.startsWith('#s=')) openStory(h.slice(3)); else if (h.startsWith('#p=')) openPlace(decodeURIComponent(h.slice(3)));

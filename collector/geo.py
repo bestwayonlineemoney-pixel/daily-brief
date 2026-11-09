@@ -1,4 +1,4 @@
-"""Find the places a headline is about. Names match the country names in site/vendor/world-lite.json."""
+"""Find the places a headline is about. Names match the country names in site/vendor/countries.json."""
 import json
 import re
 from pathlib import Path
@@ -64,9 +64,10 @@ def _load(map_file):
     global _NAMES, _RX
     names = {}
     try:
-        topo = json.loads(Path(map_file).read_text(encoding="utf-8"))
-        for g in topo["objects"]["countries"]["geometries"]:
-            n = (g.get("properties") or {}).get("name")
+        data = json.loads(Path(map_file).read_text(encoding="utf-8"))
+        all_names = data.keys() if isinstance(data, dict) and "objects" not in data else \
+            [(g.get("properties") or {}).get("name") for g in data["objects"]["countries"]["geometries"]]
+        for n in all_names:
             if n and len(n) > 3 and "." not in n:
                 names[n.lower()] = n
     except Exception:  # noqa
