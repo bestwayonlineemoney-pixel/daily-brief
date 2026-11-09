@@ -142,27 +142,31 @@
     const ctx = cv.getContext('2d'), P = placeIndex(list), hotC = {};
     P.forEach((p) => { const o = hotC[p.c] || (hotC[p.c] = { n: 0, cat: p.cat }); o.n += p.n; });
     const feats = FEATS.filter((f) => hotC[f.properties.name]);
+    /* glowing arcs between places named in the same story */
+    const ARCS = []; list.slice(0, 40).forEach((s) => { const L = (s.places || []).map((p) => p.pt || CENT[p.c]).filter(Boolean); if (L.length > 1 && d3.geoDistance(L[0], L[1]) > .05) ARCS.push({ a: L[0], b: L[1], c: col(s.cat) }); });
     let W = 0, H = 0, R = 0, cx = 0, cy = 0, dpr = Math.min(devicePixelRatio || 1, 2);
     const proj = d3.geoOrthographic().clipAngle(90).precision(.7), path = d3.geoPath(proj, ctx);
     if (!GROT.r) { const f = P[0]; GROT.r = f ? [-f.ll[0] + 25, -Math.max(-40, Math.min(40, f.ll[1])) * .7] : [-30, -20]; }
     const rot = GROT.r; let hover = null, drag = null, idle = 0, raf = 0, last = 0, visible = true, spin = null;
     const mobile = () => W < 640;
     function size() { const b = box.getBoundingClientRect(); W = b.width; H = b.height; cv.width = W * dpr; cv.height = H * dpr;
-      R = mobile() ? Math.min(W * .44, H * .36) : Math.min((W - 260) * .46, H * .42); cx = mobile() ? W / 2 : (W - 260) / 2 + 10; cy = mobile() ? H * .44 : H * .52; }
+      R = Math.min(W, H) * .40; cx = W / 2; cy = H / 2; }
     size();
     const ro = 'ResizeObserver' in window ? new ResizeObserver(() => { size(); draw(performance.now()); }) : null; if (ro) ro.observe(box);
     function vis(ll) { return d3.geoDistance(ll, [-rot[0], -rot[1]]) < Math.PI / 2 - .05; }
     function draw(t) {
       proj.scale(R).translate([cx, cy]).rotate(rot);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, W, H);
-      let g = ctx.createRadialGradient(cx, cy, R * .92, cx, cy, R * 1.3); g.addColorStop(0, 'rgba(127,178,255,.28)'); g.addColorStop(1, 'rgba(127,178,255,0)');
-      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, R * 1.3, 0, 7); ctx.fill();
-      g = ctx.createRadialGradient(cx - R * .35, cy - R * .4, R * .1, cx, cy, R); g.addColorStop(0, '#24395f'); g.addColorStop(.75, '#0e1729'); g.addColorStop(1, '#080c16');
+      let g = ctx.createRadialGradient(cx, cy, R * .9, cx, cy, R * 1.24); g.addColorStop(0, 'rgba(99,102,241,.38)'); g.addColorStop(.5, 'rgba(34,211,238,.10)'); g.addColorStop(1, 'rgba(34,211,238,0)');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, R * 1.24, 0, 7); ctx.fill();
+      g = ctx.createRadialGradient(cx - R * .35, cy - R * .4, R * .1, cx, cy, R); g.addColorStop(0, '#1d2a52'); g.addColorStop(.7, '#0b1022'); g.addColorStop(1, '#05070f');
       ctx.fillStyle = g; ctx.beginPath(); path({ type: 'Sphere' }); ctx.fill();
       ctx.beginPath(); path(GRAT); ctx.strokeStyle = 'rgba(255,255,255,.06)'; ctx.lineWidth = 1; ctx.stroke();
-      ctx.beginPath(); FEATS.forEach((f) => path(f)); ctx.fillStyle = '#3a4459'; ctx.fill();
+      ctx.beginPath(); FEATS.forEach((f) => path(f)); ctx.fillStyle = '#2b3656'; ctx.fill();
       feats.forEach((f) => { const o = hotC[f.properties.name]; ctx.beginPath(); path(f); ctx.globalAlpha = Math.min(.85, .3 + o.n * .08); ctx.fillStyle = col(o.cat); ctx.fill(); ctx.globalAlpha = 1; });
       ctx.beginPath(); path(MESH); ctx.strokeStyle = 'rgba(12,16,28,.85)'; ctx.lineWidth = .6; ctx.stroke();
+      ctx.save(); ctx.lineWidth = 1.8; ctx.setLineDash([3, 7]); ctx.lineDashOffset = -t / 40;
+      ARCS.forEach((a) => { ctx.beginPath(); path({ type: 'LineString', coordinates: [a.a, a.b] }); ctx.strokeStyle = a.c; ctx.globalAlpha = .9; ctx.stroke(); }); ctx.restore(); ctx.globalAlpha = 1;
       const ph = (t % 2400) / 2400; let labels = 0; const placed = [], jobs = [];
       P.forEach((p, i) => { if (!vis(p.ll)) { p.xy = null; return; } const [x, y] = proj(p.ll); p.xy = [x, y]; const c = col(p.cat), r0 = 3.5 + Math.sqrt(p.n) * 2.6; p.r = r0;
         ctx.beginPath(); ctx.arc(x, y, r0 + ph * 22, 0, 7); ctx.strokeStyle = c; ctx.globalAlpha = (1 - ph) * .7; ctx.lineWidth = 2; ctx.stroke(); ctx.globalAlpha = 1;
@@ -322,195 +326,201 @@
   const chapterOrder = () => CATS.filter((c) => storiesOf(c).length).sort((a, b) => {
     const A = storiesOf(a).filter(quality)[0], B = storiesOf(b).filter(quality)[0]; return (B ? imp(B) : -99) - (A ? imp(A) : -99); });
 
+  /* ================= motion helpers ================= */
+  const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const rvObs = 'IntersectionObserver' in window && !still ? new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) { e.target.classList.add('in'); rvObs.unobserve(e.target); runCounts(e.target); } }), { rootMargin: '0px 0px -8% 0px' }) : null;
+  function rv(node, i) { node.classList.add('rv'); node.style.setProperty('--d', ((i || 0) * 70) + 'ms'); if (rvObs) rvObs.observe(node); else { node.classList.add('in'); runCounts(node); } return node; }
+  const LASTNUM = {};
+  function cnt(value, fmt, key) { const s = el('span', { class: 'cnt', text: fmt(value) }); s._to = value; s._fmt = fmt; s._from = key && isNum(LASTNUM[key]) ? LASTNUM[key] : (Math.abs(value) > 50 ? value * 0.96 : 0); if (key) LASTNUM[key] = value; return s; }
+  function runCounts(root) {
+    (root.classList && root.classList.contains('cnt') ? [root] : [...root.querySelectorAll('.cnt')]).forEach((n) => {
+      if (n._done || !isNum(n._to)) return; n._done = 1; if (still || n._from === n._to) { n.textContent = n._fmt(n._to); return; }
+      const a = n._from, b = n._to, t0 = performance.now(), dur = 900;
+      const tick = (t) => { const k = Math.min(1, (t - t0) / dur), e = 1 - Math.pow(1 - k, 3); n.textContent = n._fmt(a + (b - a) * e); if (k < 1) requestAnimationFrame(tick); };
+      requestAnimationFrame(tick);
+    });
+  }
+  document.addEventListener('pointermove', (e) => { const g = e.target.closest && e.target.closest('.spot'); if (!g) return; const b = g.getBoundingClientRect(); g.style.setProperty('--mx', (e.clientX - b.left) + 'px'); g.style.setProperty('--my', (e.clientY - b.top) + 'px'); }, { passive: true });
+
   /* ================= small pieces ================= */
+  function badge(s) {
+    return s.status === 'OFFICIAL' ? el('span', { class: 'vb o', title: 'Comes from an official source' }, el('i', { text: '◆' }), 'Official source')
+      : el('span', { class: 'vb v', title: 'Reported by ' + s.n + ' independent newsrooms' }, el('i', { text: '✓' }), 'Confirmed · ' + s.n + ' newsrooms');
+  }
   function kicker(s, opt) {
     opt = opt || {};
     const k = el('div', { class: 'kick' });
     if (!opt.noCat) k.append(el('span', { class: 'kc', style: { '--c': cv(s.cat) } }, el('i'), SHORT[s.cat]));
     if (s.breaking && !DAY) k.append(el('span', { class: 'tag brk', text: 'Breaking' }));
     if (isNew(s)) k.append(el('span', { class: 'tag new', text: 'New' }));
-    else if (isUpd(s)) k.append(el('span', { class: 'tag upd', text: 'Updated · ' + newReports(s) + ' new' }));
-    if (watched(s)) k.append(el('span', { class: 'tag watch', text: '★ Watch' }));
-    k.append(el('span', { class: 'st ' + (s.status === 'VERIFIED' ? 'v' : s.status === 'OFFICIAL' ? 'o' : 's'), title: s.status === '1 SOURCE' ? 'Only one outlet so far' : '',
-      text: s.status === 'VERIFIED' ? '✓ ' + s.n + ' sources' : s.status === 'OFFICIAL' ? '◆ Official' : '1 source' }));
-    k.append(el('span', { class: 'tm', text: ago(s.last) }));
-    if (s.developing && !opt.light) k.append(el('span', { class: 'tag dev', text: 'Developing · day ' + Math.max(2, Math.ceil((s.last - s.first) / 86400)) }));
+    else if (isUpd(s)) k.append(el('span', { class: 'tag upd', text: '+' + newReports(s) + ' update' + (newReports(s) > 1 ? 's' : '') }));
+    if (watched(s)) k.append(el('span', { class: 'tag watch', text: '★' }));
+    k.append(badge(s), el('span', { class: 'tm', text: ago(s.last) }));
     return k;
   }
-  const srcLine = (s) => el('div', { class: 'srcs', text: (s.orgs || []).slice(0, 4).join(' · ') + (s.orgs.length > 4 ? ' +' + (s.orgs.length - 4) : '') });
+  const srcLine = (s) => el('div', { class: 'srcs', text: (s.orgs || []).slice(0, 4).join(' · ') + (s.orgs.length > 4 ? '  +' + (s.orgs.length - 4) : '') });
+  function act(node, id) { node.tabIndex = 0; node.setAttribute('role', 'button'); node.onclick = () => openStory(id); node.onkeydown = (e) => { if (e.key === 'Enter') openStory(id); }; return node; }
   function item(s, opt) {
     opt = opt || {};
-    const a = el('article', { 'data-sid': s.id, class: 'item' + (seen.has(s.id) ? ' read' : '') + (opt.num ? ' numd' : '') + (opt.thumb ? ' has-th' : ''), tabindex: 0, role: 'button',
-      onclick: () => openStory(s.id), onkeydown: (e) => { if (e.key === 'Enter') openStory(s.id); } });
-    if (opt.num) a.append(el('span', { class: 'num', style: { '--c': cv(s.cat) }, text: opt.num }));
+    const a = act(el('article', { 'data-sid': s.id, class: 'item spot' + (seen.has(s.id) ? ' read' : '') }), s.id);
+    if (opt.thumb !== false) { const t = el('div', { class: 'th' }); t.append(artBox(s)); a.append(t); }
     a.append(el('div', { class: 'body' }, kicker(s, opt), el('h3', { text: s.title }), s.dek && !opt.noDek ? el('p', { class: 'dek', text: s.dek }) : null, opt.noSrc ? null : srcLine(s)));
-    if (opt.thumb) { const t = el('div', { class: 'th' }); t.append(artBox(s)); a.append(t); }
     return a;
   }
-  function lead(s) {
-    const a = el('article', { class: 'lead', tabindex: 0, role: 'button', onclick: () => openStory(s.id), onkeydown: (e) => { if (e.key === 'Enter') openStory(s.id); } });
-    const b = el('div', { class: 'banner' }); b.append(artBox(s, true));
-    const m = marketArt(s); if (m) b.append(el('span', { class: 'mchip' }, m.name + ' ', el('b', { text: fmtP(m) }), ' ', el('i', { class: (m.chg || 0) >= 0 ? 'u' : 'd', text: fmtC(m.chg) })));
-    a.append(b, el('div', { class: 'body' }, kicker(s), el('h2', { text: s.title }), s.dek ? el('p', { class: 'dek', text: s.dek }) : null, srcLine(s)));
+  function tileB(s, size) {
+    const a = act(el('article', { 'data-sid': s.id, class: 'bt glass spot ' + (size || '') + (seen.has(s.id) ? ' read' : ''), style: { '--c': cv(s.cat) } }), s.id);
+    const art = el('div', { class: 'bt-art' }); art.append(artBox(s, size === 'xl'));
+    const m = marketArt(s); if (m) art.append(el('span', { class: 'mchip' }, m.name + ' ', el('b', { text: fmtP(m) }), ' ', el('i', { class: (m.chg || 0) >= 0 ? 'u' : 'd', text: fmtC(m.chg) })));
+    a.append(art, el('div', { class: 'bt-body' }, kicker(s), el('h3', { text: s.title }), s.dek && (size === 'xl' || size === 'lg') ? el('p', { class: 'dek', text: s.dek }) : null, srcLine(s)));
     return a;
   }
   function sec(title, opt, ...kids) {
     opt = opt || {};
-    return el('section', { class: 'sec ' + (opt.cls || ''), id: opt.id || null, style: opt.c ? { '--c': opt.c } : null },
-      el('div', { class: 'sec-h' }, el('h2', { text: title }), opt.sub ? el('span', { class: 'sub', text: opt.sub }) : null, opt.more || null), kids);
+    return rv(el('section', { class: 'sec ' + (opt.cls || ''), id: opt.id || null, style: opt.c ? { '--c': opt.c } : null },
+      el('div', { class: 'sec-h' }, opt.eyebrow ? el('div', { class: 'eyebrow', text: opt.eyebrow }) : null, el('h2', { text: title }), opt.sub ? el('p', { class: 'sub', text: opt.sub }) : null, opt.more || null), kids));
   }
   function tile(m, big, mode) {
-    const sc = sinceChg(m), useSince = mode === 'since' && sc !== null, up = ((useSince ? sc : m.chg) || 0) >= 0, d = sparkPath(m.spark, 0, 120, 3, 27);
-    const t = el('div', { class: 'tile' + (big ? ' big' : ''), title: m.src ? 'Source: ' + m.src : '' }, el('div', { class: 'tn', text: m.name }), el('div', { class: 'tv', text: fmtP(m) }),
-      el('div', { class: 'tc ' + (up ? 'u' : 'd'), text: m.err ? 'not available' : useSince ? fmtC(sc) + ' since visit' : fmtC(m.chg) + ' today' }),
-      !mode && sc !== null && Math.abs(sc) >= 0.01 && sinceMode() ? el('div', { class: 'ts ' + (sc >= 0 ? 'u' : 'd'), text: fmtC(sc) + ' since visit' }) : null);
-    if (d) { const g = svg('0 0 120 30', `<path d="${d}" fill="none" stroke="${up ? '#22C55E' : '#EF4444'}" stroke-width="1.6" stroke-linejoin="round"/>`); g.setAttribute('preserveAspectRatio', 'none'); g.classList.add('tsp'); t.append(g); }
+    const sc = sinceChg(m), useSince = mode === 'since' && sc !== null, chg = useSince ? sc : m.chg, up = (chg || 0) >= 0, d = sparkPath(m.spark, 0, 120, 4, 30);
+    const t = el('div', { class: 'mt glass spot' + (big ? ' big' : ''), title: (m.src ? 'Source: ' + m.src : '') + (m.chk ? ' · checked against ' + m.chk.src + ' (' + (m.chk.diff >= 0 ? '+' : '') + m.chk.diff + '%)' : '') },
+      el('div', { class: 'mt-n' }, m.name, m.ok ? el('span', { class: 'ck', title: 'Price confirmed by a second source', text: '✓' }) : null),
+      el('div', { class: 'mt-v' }, isNum(m.p) ? cnt(m.p, (v) => fmtP(m, v), 'p_' + m.k) : '—'),
+      el('div', { class: 'mt-c ' + (up ? 'u' : 'd') }, m.err ? 'not available' : (up ? '▲ ' : '▼ ') + fmtC(chg).replace(/^[+−]/, '') + (useSince ? ' since visit' : ' today')));
+    if (d) { const g = svg('0 0 120 34', `<defs><linearGradient id="sg${++gid}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${up ? '#34D399' : '#F87171'}" stop-opacity=".35"/><stop offset="1" stop-color="${up ? '#34D399' : '#F87171'}" stop-opacity="0"/></linearGradient></defs>
+      <path d="${d} L120 34 L0 34 Z" fill="url(#sg${gid})"/><path class="draw" d="${d}" fill="none" stroke="${up ? '#34D399' : '#F87171'}" stroke-width="1.6" stroke-linejoin="round" pathLength="1"/>`); g.setAttribute('preserveAspectRatio', 'none'); g.classList.add('mt-s'); t.append(g); }
     return t;
-  }
-  function mrow(m) {
-    const up = (m.chg || 0) >= 0, d = sparkPath(m.spark, 0, 60, 2, 18);
-    const g = d ? svg('0 0 60 20', `<path d="${d}" fill="none" stroke="${up ? '#22C55E' : '#EF4444'}" stroke-width="1.4"/>`) : el('span');
-    if (d) g.setAttribute('preserveAspectRatio', 'none');
-    return el('div', { class: 'mrow', title: m.src || '' }, el('span', { class: 'mn', text: m.name }), g, el('span', { class: 'mv', text: fmtP(m) }), el('span', { class: 'mc ' + (up ? 'u' : 'd'), text: fmtC(m.chg) }));
   }
   function fngGauge(f) {
     const a = Math.PI * (1 - f.v / 100), x = 60 + Math.cos(a) * 46, y = 62 - Math.sin(a) * 46;
-    const c = f.v < 25 ? '#EF4444' : f.v < 45 ? '#F97316' : f.v < 56 ? '#EAB308' : f.v < 76 ? '#84CC16' : '#22C55E';
-    return el('div', { class: 'gauge' }, svg('0 0 120 70', `<defs><linearGradient id="fg${++gid}"><stop offset="0" stop-color="#EF4444"/><stop offset=".5" stop-color="#EAB308"/><stop offset="1" stop-color="#22C55E"/></linearGradient></defs>
-      <path d="M14 62 A46 46 0 0 1 106 62" fill="none" stroke="url(#fg${gid})" stroke-width="10" stroke-linecap="round"/><line x1="60" y1="62" x2="${x}" y2="${y}" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><circle cx="60" cy="62" r="5" fill="currentColor"/>`),
-      el('div', null, el('div', { class: 'gv', style: { color: c }, text: f.v }), el('div', { class: 'gl', text: f.label }), el('small', { text: 'Crypto Fear & Greed' })));
+    const c = f.v < 25 ? '#F87171' : f.v < 45 ? '#FB923C' : f.v < 56 ? '#FACC15' : f.v < 76 ? '#A3E635' : '#34D399';
+    return el('div', { class: 'mt glass spot gauge' }, svg('0 0 120 70', `<defs><linearGradient id="fg${++gid}"><stop offset="0" stop-color="#F87171"/><stop offset=".5" stop-color="#FACC15"/><stop offset="1" stop-color="#34D399"/></linearGradient></defs>
+      <path d="M14 62 A46 46 0 0 1 106 62" fill="none" stroke="url(#fg${gid})" stroke-width="9" stroke-linecap="round"/><line x1="60" y1="62" x2="${x}" y2="${y}" stroke="#fff" stroke-width="3" stroke-linecap="round"/><circle cx="60" cy="62" r="5" fill="#fff"/>`),
+      el('div', null, el('div', { class: 'mt-n', text: 'Crypto Fear & Greed' }), el('div', { class: 'mt-v', style: { color: c } }, cnt(f.v, (v) => String(Math.round(v)), 'fng')), el('div', { class: 'mt-c', text: f.label })));
   }
-
-  /* ================= right rail ================= */
-  function rail(focus) {
-    const r = el('aside', { class: 'rail' });
-    const groups = focus && MKT[focus] ? [focus] : ['crypto', 'forex', 'commodities', 'energy', 'economy'];
-    const box = el('div', { class: 'card mk' }, el('h4', { text: focus && MKT[focus] ? MKT_NAME[focus] + ' now' : 'Markets now' }));
-    groups.forEach((g) => { const L = MKT[g].map((k) => MK[k]).filter((m) => m && isNum(m.p)); if (!L.length) return; if (groups.length > 1) box.append(el('div', { class: 'mg', text: MKT_NAME[g] })); L.forEach((m) => box.append(mrow(m))); });
-    if (D.fng && (!focus || focus === 'crypto')) box.append(fngGauge(D.fng));
-    box.append(el('div', { class: 'fine', text: 'Change on the day · for the big picture, not trading' }));
-    r.append(box);
-    const g = el('div', { class: 'card globe-box' }, el('h4', { text: 'Where it\'s happening' }), el('div', { class: 'fine', text: 'Drag to turn · tap a dot' }));
-    r.append(g);
-    const list = focus ? storiesOf(focus) : D.stories.filter(quality);
-    requestAnimationFrame(() => { if (FEATS.length && list.some((s) => (s.places || []).length)) mountGlobe(g, list); else g.remove(); });
-    const dv = D.stories.filter((s) => s.developing && (!focus || inCat(s, focus))).sort((a, b) => imp(b) - imp(a)).slice(0, 5);
-    if (dv.length) r.append(el('div', { class: 'card dv' }, el('h4', { text: 'Developing' }), dv.map((s) => {
-      const span = Math.max(1, s.last - s.first), tl = el('div', { class: 'tl' });
-      (s.reports || []).forEach((x) => tl.append(el('i', { style: { left: ((x.ts - s.first) / span * 100).toFixed(1) + '%', '--c': cv(s.cat) } })));
-      return el('div', { class: 'dvi', onclick: () => openStory(s.id) }, el('div', { class: 'dvt', text: s.title }), tl, el('div', { class: 'fine', text: 'since ' + dshort(s.first) + ' · ' + (s.reports || []).length + ' reports' }));
-    })));
-    return r;
-  }
+  function stat(v, label, key) { return el('div', { class: 'stat' }, el('b', null, cnt(v, (x) => Math.round(x).toLocaleString(), key)), el('span', { text: label })); }
 
   /* ================= the overview page ================= */
   function greet() { const h = new Date().getHours(); return h < 5 ? 'Good night' : h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'; }
   function viewHome(M) {
-    const content = el('div', { class: 'col' }); M.append(el('div', { class: 'grid' }, content, rail()));
-    const q = D.stories.filter(quality);
-    if (!D.stories.length) { content.append(el('div', { class: 'empty', text: LIVE ? 'No stories yet.' : 'Collecting the first news… this page fills itself in a minute.' })); return; }
-    /* hello */
-    const nNew = D.stories.filter((s) => isNew(s) && quality(s)).length, nUpd = D.stories.filter(isUpd).length, nBrk = DAY ? 0 : D.stories.filter((s) => s.breaking).length;
-    const moves = (D.markets || []).filter((m) => isNum(m.p) && isNum(m.chg)).map((m) => ({ m, c: sinceMode() && isNum(sinceChg(m)) ? sinceChg(m) : m.chg }))
-      .sort((a, b) => Math.abs(b.c) - Math.abs(a.c)).slice(0, 4);
-    const hello = el('section', { class: 'hello' },
-      el('div', { class: 'hi' }, DAY ? 'From the archive' : greet() + '.'),
-      el('p', { class: 'lede', text: DAY ? 'The biggest stories of ' + new Date(DAY + 'T12:00:00').toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' }) + '.'
-        : sinceMode() ? `Since you were last here ${ago(since).replace(' ago', '')} ago: ${nNew} new ${nNew === 1 ? 'story' : 'stories'} worth knowing${nUpd ? ', ' + nUpd + ' updated' : ''}${nBrk ? ', ' + nBrk + ' breaking' : ''}.`
-          : `Here is the day so far: ${q.length} stories confirmed by two or more newsrooms or by official sources.` }),
-      el('div', { class: 'hello-act' }, el('button', { class: 'btn pri big', onclick: () => openBrief() }, '▶  Play the 5-minute brief'),
-        el('span', { class: 'fine', text: (D.feeds ? D.feeds.ok + ' of ' + D.feeds.total + ' sources · ' : '') + 'updated ' + (D.updated ? ago(D.updated) : '—') })));
-    if (moves.length) hello.append(el('div', { class: 'moves' }, el('div', { class: 'mg', text: sinceMode() && snapPrev ? 'Biggest moves since you left' : 'Biggest moves today' }),
-      el('div', { class: 'tiles' }, moves.map(({ m }) => tile(m, false, sinceMode() && snapPrev ? 'since' : 'today')))));
-    content.append(hello);
+    if (!D.stories.length) { M.append(el('section', { class: 'hero' }, el('div', { class: 'hero-l' }, el('h1', { class: 'grad', text: LIVE ? 'No confirmed stories yet.' : 'Collecting the first news…' }),
+      el('p', { class: 'lede', text: 'This page fills itself in a minute.' })), el('div', { class: 'globe-hero skel' }))); return; }
+    const nNew = D.stories.filter(isNew).length, nUpd = D.stories.filter(isUpd).length, nBrk = DAY ? 0 : D.stories.filter((s) => s.breaking).length;
+    /* hero */
+    const lede = DAY ? 'The confirmed stories of ' + new Date(DAY + 'T12:00:00').toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' }) + '.'
+      : sinceMode() ? null : `Here is the day so far: ${D.stories.length} stories, each confirmed by two or more independent newsrooms or an official source.`;
+    const L = el('div', { class: 'hero-l' },
+      rv(el('div', { class: 'eyebrow live' }, DAY ? el('span', { class: 'dot off' }) : el('span', { class: 'dot' }), DAY ? 'Archive' : 'Live', ' · ', new Date(DAY ? DAY + 'T12:00:00' : Date.now()).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' }), D.updated ? ' · updated ' + ago(D.updated) : ''), 0),
+      rv(el('h1', { class: 'grad', text: DAY ? 'From the archive.' : greet() + '.' }), 1),
+      rv(lede ? el('p', { class: 'lede', text: lede }) : el('p', { class: 'lede' }, `Since you were last here ${ago(since).replace(' ago', '')} ago, `, el('b', { text: nNew + ' new ' + (nNew === 1 ? 'story' : 'stories') }), ' broke', nUpd ? [' and ', el('b', { text: nUpd + ' moved forward' })] : '', nBrk ? [' — ', el('b', { class: 'red', text: nBrk + ' breaking' })] : '', '.'), 2),
+      rv(el('div', { class: 'cta' }, el('button', { class: 'btn grad-btn big', onclick: () => openBrief() }, el('span', { class: 'play' }, '▶'), 'Play the 5-minute brief'),
+        el('button', { class: 'btn ghost big', onclick: () => { const t = $('away') || $('top'); if (t) t.scrollIntoView({ behavior: 'smooth' }); } }, sinceMode() && nNew + nUpd ? 'What\'s new ↓' : 'Top stories ↓')), 3),
+      rv(el('div', { class: 'stats' }, stat(D.stories.length, 'confirmed stories', 's1'), stat(D.outlets || new Set(D.stories.flatMap((s) => s.orgs)).size, 'newsrooms', 's2'),
+        D.feeds ? stat(D.feeds.ok, 'of ' + D.feeds.total + ' sources live', 's3') : null, D.unconfirmed_hidden ? stat(D.unconfirmed_hidden, 'unconfirmed kept out', 's4') : null), 4));
+    const G = el('div', { class: 'globe-hero' }, el('div', { class: 'gh-cap' }, el('span', { class: 'dot' }), 'Where it\'s happening · drag to turn'));
+    M.append(el('section', { class: 'hero' }, L, rv(G, 2)));
+    requestAnimationFrame(() => { if (FEATS.length) mountGlobe(G, D.stories); });
     /* breaking */
-    if (!DAY) D.stories.filter((s) => s.breaking).sort((a, b) => b.n - a.n).slice(0, 2).forEach((s) => content.append(el('div', { class: 'breaking', onclick: () => openStory(s.id) },
-      el('span', { class: 'bl', text: 'Breaking' }), el('span', { class: 'bt', text: s.title }), el('span', { class: 'fine', text: s.n + ' newsrooms · ' + ago(s.first) }))));
-    /* since you were away */
+    if (!DAY) D.stories.filter((s) => s.breaking).sort((a, b) => b.n - a.n).slice(0, 2).forEach((s, i) => M.append(rv(act(el('div', { class: 'breaking glass' },
+      el('span', { class: 'bl' }, el('i'), 'Breaking'), el('span', { class: 'btx', text: s.title }), el('span', { class: 'fine', text: s.n + ' newsrooms · ' + ago(s.first) })), s.id), i)));
+    /* market pulse */
+    const order = ['btc', 'eth', 'spx', 'ndx', 'gold', 'oil', 'gas', 'dxy', 'eur', 'jpy', 'lkr'];
+    const ms = order.map((k) => MK[k]).filter((m) => m && isNum(m.p));
+    if (ms.length) M.append(sec('Market pulse', { cls: 'pulse', eyebrow: 'Numbers', sub: sinceMode() && snapPrev ? 'Change today · tap a chapter for more' : 'Change today', more: el('span', { class: 'fine', text: 'For the big picture, not trading' }) },
+      el('div', { class: 'mts' }, ms.map((m, i) => rv(tile(m, false, 'today'), i)), D.fng ? rv(fngGauge(D.fng), ms.length) : null)));
+    /* while you were away */
     const shown = new Set();
     if (sinceMode()) {
-      const L = D.stories.filter((s) => (isNew(s) && (quality(s) || watched(s) || s.home)) || isUpd(s)).sort((a, b) => imp(b) - imp(a)).slice(0, 8);
-      if (L.length) { L.forEach((s) => shown.add(s.id)); content.append(sec('While you were away', { sub: 'New and updated, most important first', c: 'var(--accent)' }, el('div', { class: 'list' }, L.map((s) => item(s, { thumb: true }))))); }
+      const A = D.stories.filter((s) => isNew(s) || isUpd(s)).sort((a, b) => imp(b) - imp(a)).slice(0, 8);
+      if (A.length) { A.forEach((s) => shown.add(s.id)); M.append(sec('While you were away', { id: 'away', eyebrow: 'Since ' + hm(since), sub: 'New and updated stories, most important first' },
+        el('div', { class: 'list glass' }, A.map((s) => item(s))))); }
     }
-    /* top stories */
-    const top = D.top.map((id) => BYID[id]).filter((s) => s && !shown.has(s.id)).slice(0, 7);
-    if (top.length) { top.forEach((s) => shown.add(s.id)); content.append(sec(DAY ? 'Top stories of the day' : 'Today\'s top stories', { sub: 'The day in order of importance' },
-      lead(top[0]), el('div', { class: 'list' }, top.slice(1).map((s, i) => item(s, { num: i + 2, thumb: false }))))); }
+    /* top stories - bento */
+    const top = D.top.map((id) => BYID[id]).filter((s) => s && !shown.has(s.id)).slice(0, 6);
+    if (top.length) { top.forEach((s) => shown.add(s.id));
+      const sizes = { 1: ['wide'], 2: ['lg', 'lg'], 3: ['xl', 'md', 'md'], 4: ['xl', 'md', 'md', 'wide'], 5: ['xl', 'md', 'md', 'lg', 'lg'], 6: ['xl', 'md', 'md', 'sm', 'sm', 'sm'] }[top.length];
+      M.append(sec(DAY ? 'Top stories of the day' : 'Top stories', { id: 'top', eyebrow: 'The day', sub: 'In order of importance' }, el('div', { class: 'bento' }, top.map((s, i) => rv(tileB(s, sizes[i]), i))))); }
     /* every area */
-    const cards = chapterOrder().map((c) => {
-      const L = storiesOf(c), Q = L.filter(quality), pick = (Q.length ? Q : L).slice(0, 3), ms = (MKT[c] || []).map((k) => MK[k]).filter((m) => m && isNum(m.p)).slice(0, 3);
-      return el('div', { class: 'area', style: { '--c': cv(c) }, role: 'button', tabindex: 0, onclick: () => go(c), onkeydown: (e) => { if (e.key === 'Enter') go(c); } },
-        el('div', { class: 'ah' }, el('span', { class: 'ai', text: ICON[c] }), el('b', { text: cname(c) }), el('span', { class: 'an', text: L.length })),
-        ms.length ? el('div', { class: 'am' }, ms.map((m) => el('span', null, m.name.replace(' oil', '').replace(' index', ''), ' ', el('b', { text: fmtP(m) }), ' ', el('i', { class: (m.chg || 0) >= 0 ? 'u' : 'd', text: fmtC(m.chg) })))) : null,
-        el('ul', null, pick.map((s) => el('li', { class: seen.has(s.id) ? 'read' : '' }, s.title))), el('span', { class: 'ago', text: 'Open ' + SHORT[c] + ' →' }));
+    const cards = chapterOrder().map((c, i) => {
+      const Ls = storiesOf(c), pick = Ls.slice(0, 3), mk = (MKT[c] || []).map((k) => MK[k]).filter((m) => m && isNum(m.p)).slice(0, 2);
+      return rv(el('div', { class: 'area glass spot', style: { '--c': cv(c) }, role: 'button', tabindex: 0, onclick: () => go(c), onkeydown: (e) => { if (e.key === 'Enter') go(c); } },
+        el('div', { class: 'ah' }, el('span', { class: 'ai', text: ICON[c] }), el('b', { text: cname(c) }), el('span', { class: 'an', text: Ls.length + (Ls.length === 1 ? ' story' : ' stories') })),
+        mk.length ? el('div', { class: 'am' }, mk.map((m) => el('span', null, m.name.replace(' oil', '').replace(' index', ''), el('b', { text: fmtP(m) }), el('i', { class: (m.chg || 0) >= 0 ? 'u' : 'd', text: fmtC(m.chg) })))) : null,
+        el('ul', null, pick.map((s) => el('li', { class: seen.has(s.id) ? 'read' : '' }, s.title))), el('span', { class: 'go' }, 'Open ' + SHORT[c], el('i', { text: '→' }))), i);
     });
-    content.append(sec('Every area at a glance', { sub: 'Tap an area to read it' }, el('div', { class: 'areas' }, cards)));
+    M.append(sec('Every area', { eyebrow: 'Chapters', sub: 'The whole day, sorted. Tap one to read it' }, el('div', { class: 'areas' }, cards)));
+    /* developing */
+    const dv = D.stories.filter((s) => s.developing && !shown.has(s.id)).sort((a, b) => imp(b) - imp(a)).slice(0, 6);
+    if (dv.length) M.append(sec('Still developing', { eyebrow: 'Ongoing', sub: 'Started earlier, still getting new reports' }, el('div', { class: 'devs' }, dv.map((s, i) => {
+      const span = Math.max(1, s.last - s.first), tl = el('div', { class: 'tl' });
+      (s.reports || []).forEach((x) => tl.append(el('i', { style: { left: ((x.ts - s.first) / span * 100).toFixed(1) + '%' }, title: x.o + ' · ' + dshort(x.ts) + ' ' + hm(x.ts) })));
+      return rv(act(el('div', { class: 'dev glass spot', style: { '--c': cv(s.cat) } }, kicker(s), el('h3', { text: s.title }), tl,
+        el('div', { class: 'fine', text: 'Since ' + dshort(s.first) + ' · ' + (s.reports || []).length + ' reports · latest ' + hm(s.last) })), s.id), i);
+    }))));
     /* watch words */
     const W = D.stories.filter((s) => watched(s) && !shown.has(s.id)).sort((a, b) => imp(b) - imp(a)).slice(0, 6);
-    if (W.length) content.append(sec('Your watch words', { sub: (watch || []).join(' · '), more: el('button', { class: 'lnk', onclick: editWatch, text: 'Edit' }) }, el('div', { class: 'list' }, W.map((s) => item(s)))));
+    if (W.length) M.append(sec('Your watch words', { eyebrow: '★ Watching', sub: (watch || []).join(' · '), more: el('button', { class: 'btn ghost sm', onclick: editWatch, text: 'Edit' }) }, el('div', { class: 'list glass' }, W.map((s) => item(s)))));
   }
 
   /* ================= a chapter ================= */
   function viewCat(M, c) {
-    const content = el('div', { class: 'col' }); M.append(el('div', { class: 'grid' }, content, rail(c)));
-    const L = storiesOf(c), Q = L.filter(quality), single = L.filter((s) => !quality(s)), A = alsoOf(c);
-    const head = el('header', { class: 'ch', style: { '--c': cv(c) } }, el('div', { class: 'chk', text: ICON[c] + '  Chapter' }), el('h1', { text: cname(c) }),
-      el('p', { class: 'lede', text: L.length ? `${Q.length} confirmed ${Q.length === 1 ? 'story' : 'stories'}${single.length ? ' and ' + single.length + ' single-source headlines' : ''} in the last 24 hours.` : 'Nothing in the last 24 hours yet.' }));
+    const Ls = storiesOf(c), A = alsoOf(c);
     const ms = (MKT[c] || []).map((k) => MK[k]).filter((m) => m && isNum(m.p));
-    if (ms.length) head.append(el('div', { class: 'tiles' }, ms.map((m) => tile(m, true))));
-    content.append(head);
-    if (!L.length) return;
-    const main = Q.length ? Q : L.slice(0, 6), first = main[0];
-    content.append(lead(first));
-    const groups = {}; main.slice(1).forEach((s) => { const g = subOf(s, c); (groups[g] = groups[g] || []).push(s); });
-    Object.entries(groups).sort((a, b) => imp(b[1][0]) - imp(a[1][0])).forEach(([g, list]) =>
-      content.append(sec(g, { cls: 'sub-sec', c: cv(c) }, el('div', { class: 'list' }, list.map((s) => item(s, { noCat: true, thumb: list.length < 4 && s === list[0] }))))));
-    if (A.length) content.append(sec('Also moving ' + SHORT[c].toLowerCase(), { cls: 'sub-sec', sub: 'From other chapters', c: cv(c) }, el('div', { class: 'list' }, A.slice(0, 5).map((s) => item(s, { noDek: true })))));
-    const rest = Q.length ? single : L.slice(6);
-    if (rest.length) content.append(el('details', { class: 'more' }, el('summary', null, `More headlines (${rest.length}) · reported by one outlet so far`),
-      el('div', { class: 'list tight' }, rest.slice(0, 40).map((s) => item(s, { noCat: true, noDek: true })))));
+    M.append(el('section', { class: 'chero', style: { '--c': cv(c) } }, rv(el('div', { class: 'eyebrow' }, el('span', { class: 'ci', text: ICON[c] }), 'Chapter'), 0),
+      rv(el('h1', { class: 'grad-c', text: cname(c) }), 1),
+      rv(el('p', { class: 'lede', text: Ls.length ? `${Ls.length} confirmed ${Ls.length === 1 ? 'story' : 'stories'} in the last 24 hours, each reported by two or more newsrooms or an official source.` : 'No confirmed stories in the last 24 hours yet.' }), 2),
+      ms.length ? rv(el('div', { class: 'mts' }, ms.map((m) => tile(m, true, 'today')), c === 'crypto' && D.fng ? fngGauge(D.fng) : null), 3) : null,
+      Ls.length ? rv(el('div', { class: 'cta' }, el('button', { class: 'btn grad-btn', onclick: () => openBrief(c) }, el('span', { class: 'play' }, '▶'), 'Play this chapter')), 4) : null));
+    if (!Ls.length) return;
+    const [first, ...rest] = Ls;
+    const head = el('div', { class: 'bento' }, rv(tileB(first, 'xl'), 0)); rest.slice(0, 2).forEach((s, i) => head.append(rv(tileB(s, 'md'), i + 1)));
+    M.append(el('section', { class: 'sec' }, head));
+    const groups = {}; rest.slice(2).forEach((s) => { const g = subOf(s, c); (groups[g] = groups[g] || []).push(s); });
+    const G = Object.entries(groups).sort((a, b) => imp(b[1][0]) - imp(a[1][0]));
+    if (G.length) M.append(el('section', { class: 'sec groups' }, G.map(([g, list], i) => rv(el('div', { class: 'grp glass', style: { '--c': cv(c) } }, el('div', { class: 'grp-h' }, el('i'), g, el('span', { text: list.length })),
+      el('div', { class: 'list' }, list.map((s) => item(s, { noCat: true })))), i))));
+    if (A.length) M.append(sec('Also moving ' + SHORT[c].toLowerCase(), { eyebrow: 'From other chapters', c: cv(c) }, el('div', { class: 'list glass' }, A.slice(0, 5).map((s) => item(s, { noDek: true })))));
   }
-  function viewList(M, title, L, sub, extra) {
-    const content = el('div', { class: 'col' }); M.append(el('div', { class: 'grid' }, content, rail()));
-    content.append(sec(title, { sub, more: extra }, L.length ? el('div', { class: 'list' }, L.map((s) => item(s))) : el('div', { class: 'empty', text: 'Nothing here yet.' })));
+  function viewList(M, title, Ls, sub, extra) {
+    M.append(sec(title, { eyebrow: 'The Daily Brief', sub, more: extra, cls: 'first' }, Ls.length ? el('div', { class: 'list glass' }, Ls.map((s) => item(s))) : el('div', { class: 'empty glass', text: 'Nothing here yet.' })));
   }
   function viewSaved(M) {
-    const L = Object.values(stars).sort((a, b) => b.saved - a.saved).map((s) => BYID[s.id] || s);
-    viewList(M, 'Saved stories', L, 'Kept on this device · ' + L.length, L.length ? el('button', { class: 'lnk', onclick: () => copy(L), text: '⧉ Copy all' }) : null);
+    const Ls = Object.values(stars).sort((a, b) => b.saved - a.saved).map((s) => BYID[s.id] || s);
+    viewList(M, 'Saved stories', Ls, 'Kept on this device · ' + Ls.length, Ls.length ? el('button', { class: 'btn ghost sm', onclick: () => copy(Ls), text: '⧉ Copy all' }) : null);
   }
 
-  /* ================= header + chapters bar ================= */
+  /* ================= header + footer ================= */
   function renderChapters() {
     const nav = clear($('nav'));
-    const b = (k, label, c, n) => el('button', { class: view === k && !query ? 'on' : '', style: c ? { '--c': c } : null, onclick: () => go(k) }, c ? el('i') : null, label, n ? el('small', { text: n }) : null);
+    const b = (k, label, c) => el('button', { class: view === k && !query ? 'on' : '', style: c ? { '--c': c } : null, onclick: () => go(k) }, c ? el('i') : null, label);
     nav.append(b('front', 'Overview', null));
-    CATS.forEach((c) => { const n = storiesOf(c).filter(quality).length; if (storiesOf(c).length) nav.append(b(c, SHORT[c], cv(c), n || null)); });
-    const ns = Object.keys(stars).length; nav.append(b('saved', '☆ Saved', null, ns || null));
+    CATS.forEach((c) => { if (storiesOf(c).length) nav.append(b(c, SHORT[c], cv(c))); });
+    if (Object.keys(stars).length) nav.append(b('saved', '☆ Saved', null));
+    const on = nav.querySelector('.on'); if (on) requestAnimationFrame(() => { const l = on.offsetLeft - nav.clientWidth / 2 + on.clientWidth / 2; nav.scrollTo({ left: l, behavior: still ? 'auto' : 'smooth' }); });
   }
   function renderTop() {
-    const t = DAY ? new Date(DAY + 'T12:00:00') : new Date();
-    clear($('dateTxt')).append(t.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }), DAY ? el('em', { text: ' · archive' }) : el('em', { class: 'live', text: ' · live' }));
-    const ref = DAY || (LIVE && LIVE.date); $('prevDay').disabled = !DAYS.some((d) => d < ref); $('nextDay').disabled = !DAY;
     const items = ['btc', 'eth', 'spx', 'gold', 'oil', 'gas', 'dxy', 'eur', 'jpy', 'lkr', 'tnx', 'vix', 'silver', 'copper', 'sol'].map((k) => MK[k]).filter((m) => m && isNum(m.p))
       .map((m) => el('span', null, m.name, el('em', { text: fmtP(m) }), el('b', { class: (m.chg || 0) >= 0 ? 'u' : 'd', text: fmtC(m.chg) })));
     if (!items.length) items.push(el('span', null, 'Prices appear after the first update'));
     clear($('tick')).append(...items, ...items.map((n) => n.cloneNode(true)));
+    const ref = DAY || (LIVE && LIVE.date); $('prevDay').disabled = !DAYS.some((d) => d < ref); $('nextDay').disabled = !DAY;
+    $('dayTxt').textContent = DAY ? new Date(DAY + 'T12:00:00').toLocaleDateString([], { day: 'numeric', month: 'short' }) : 'Today';
   }
   function renderFoot() {
     const f = D.feeds || {}, list = Object.entries(f.list || {});
-    clear($('foot')).append(el('div', null, el('b', { text: 'How it works. ' }), 'The same story from different newsrooms is grouped into one. ', el('b', { text: '✓ sources' }), ' = confirmed by 2 or more independent newsrooms · ',
-      el('b', { text: '◆ Official' }), ' = a government body, central bank, regulator or agency · ', el('b', { text: '1 source' }), ' = not confirmed yet (kept under "More headlines"). ',
-      'Headlines and the short teaser come from each outlet\'s own feed; tap through to read the full story there. Pictures are drawn from data (globes, maps, charts), not news photos.',
-      list.length ? el('details', null, el('summary', { text: `Sources: ${f.ok} of ${f.total} reachable on the last update` }),
-        el('div', { class: 'fl' }, list.sort((a, b) => (a[1].ok === b[1].ok ? a[0].localeCompare(b[0]) : a[1].ok ? 1 : -1)).map(([n, h]) => el('span', { class: h.ok ? '' : 'bad', title: h.err || (h.n + ' headlines'), text: (h.ok ? '● ' : '○ ') + n })))) : null),
-      el('div', null, el('b', { text: 'The Daily Brief' }), el('br'), 'Saved stories, watch words and what you have read stay on this device. ',
-        el('button', { class: 'lnk', onclick: editWatch, text: 'Edit watch words' })));
+    clear($('foot')).append(el('div', { class: 'foot-in glass' },
+      el('div', null, el('div', { class: 'f-brand' }, el('span', { class: 'logo' }), 'The Daily Brief'),
+        el('p', null, el('b', { text: 'Only confirmed news. ' }), 'A story appears here only when two or more independent newsrooms report it, or when it comes straight from an official source (a government body, central bank, regulator or agency). ',
+          'Single-source reports are kept out' + (D.unconfirmed_hidden ? ` (${D.unconfirmed_hidden} right now)` : '') + '. Sites that mostly republish others are never counted as a confirmation. ',
+          'Crypto prices are checked against a second source (✓). Headlines and short teasers come from each outlet\'s own feed; tap through to read the full story. Pictures are drawn from data, not news photos.')),
+      el('div', null, list.length ? el('details', null, el('summary', { text: `Sources · ${f.ok} of ${f.total} reachable` }),
+        el('div', { class: 'fl' }, list.sort((a, b) => (a[1].ok === b[1].ok ? a[0].localeCompare(b[0]) : a[1].ok ? 1 : -1)).map(([n, h]) => el('span', { class: h.ok ? '' : 'bad', title: h.err || (h.n + ' headlines'), text: (h.ok ? '● ' : '○ ') + n })))) : null,
+        el('p', { class: 'fine' }, 'Saved stories, watch words and what you have read stay on this device. ', el('button', { class: 'lnk', onclick: editWatch, text: 'Edit watch words' })))));
   }
   function render() {
     renderTop(); renderChapters();
     const M = clear($('main')); if (GLOBE) { GLOBE.stop(); GLOBE = null; } GROT.r = null;
-    if (query) { const qq = query.toLowerCase(); const L = D.stories.filter((s) => (s.title + ' ' + (s.dek || '') + ' ' + s.orgs.join(' ') + ' ' + (s.places || []).map((p) => p.p).join(' ')).toLowerCase().includes(qq)).sort((a, b) => imp(b) - imp(a));
-      viewList(M, 'Search', L, `${L.length} ${L.length === 1 ? 'story matches' : 'stories match'} “${query}”`); }
+    M.classList.remove('swap'); void M.offsetWidth; M.classList.add('swap');
+    if (query) { const qq = query.toLowerCase(); const Ls = D.stories.filter((s) => (s.title + ' ' + (s.dek || '') + ' ' + s.orgs.join(' ') + ' ' + (s.places || []).map((p) => p.p).join(' ')).toLowerCase().includes(qq)).sort((a, b) => imp(b) - imp(a));
+      viewList(M, 'Search', Ls, `${Ls.length} ${Ls.length === 1 ? 'story matches' : 'stories match'} “${query}”`); }
     else if (view === 'front') viewHome(M);
     else if (CATS.includes(view)) viewCat(M, view);
     else if (view === 'saved') viewSaved(M);
@@ -519,7 +529,7 @@
   }
 
   /* ================= one story ================= */
-  function openDrawer(build) { const p = clear($('drPanel')); build(p); $('drawer').classList.add('open'); $('drawer').setAttribute('aria-hidden', 'false'); document.body.classList.add('lock'); p.scrollTop = 0; setTimeout(() => { const x = p.querySelector('.dr-x'); if (x) x.focus(); }, 60); }
+  function openDrawer(build) { const p = clear($('drPanel')); build(p); runCounts(p); $('drawer').classList.add('open'); $('drawer').setAttribute('aria-hidden', 'false'); document.body.classList.add('lock'); p.scrollTop = 0; setTimeout(() => { const x = p.querySelector('.dr-x'); if (x) x.focus(); }, 60); }
   function closeDrawer() { $('drawer').classList.remove('open'); $('drawer').setAttribute('aria-hidden', 'true'); if (!$('bm').classList.contains('open')) document.body.classList.remove('lock'); if (/^#(s|p)=/.test(location.hash)) history.replaceState(null, '', location.pathname + location.search); }
   function saveBtn(s) {
     return el('button', { class: 'btn' + (stars[s.id] ? ' on' : ''), onclick: (e) => { e.stopPropagation(); if (stars[s.id]) delete stars[s.id]; else stars[s.id] = Object.assign({}, s, { saved: Date.now() }); S.set('stars', stars);
@@ -530,14 +540,14 @@
     history.replaceState(null, '', '#s=' + id);
     openDrawer((p) => {
       p.append(el('div', { class: 'dr-art' }, artFor(s, true)), el('button', { class: 'ib dr-x', onclick: closeDrawer, 'aria-label': 'Close', text: '✕' }));
-      const off = s.orgs.filter((o) => /SEC|Fed|ECB|Bank|BLS|IMF|United Nations|NASA|WHO|USGS|EIA/i.test(o));
+      const off = s.orgs.filter((o) => /SEC|Fed|ECB|Bank|BLS|IMF|United Nations|NASA|WHO|USGS|EIA/i.test(o)), ind = s.indep || s.orgs;
       const sure = s.status === 'OFFICIAL' ? `Comes from an official source (${off.join(', ') || s.orgs[0]})` + (s.n > 1 ? `, and ${s.n - 1} more outlet${s.n > 2 ? 's' : ''} report it too.` : '.')
-        : s.status === 'VERIFIED' ? `Confirmed by ${s.n} independent newsrooms: ${s.orgs.join(', ')}.` : `Only ${s.orgs[0]} has reported this so far. Treat it as unconfirmed until others confirm it.`;
+        : `Confirmed by ${s.n} independent newsrooms: ${ind.join(', ')}.` + (s.orgs.length > ind.length ? ` Also carried by ${s.orgs.filter((o) => !ind.includes(o)).join(', ')}, which mostly republish others and are not counted.` : '');
       const rel = D.stories.filter((x) => x.id !== s.id && quality(x) && ((x.places || []).some((pp) => (s.places || []).some((q) => q.c === pp.c)) || (x.kw || []).some((k) => (s.kw || []).includes(k)))).sort((a, b) => imp(b) - imp(a)).slice(0, 4);
       const m = marketArt(s);
       p.append(el('div', { class: 'dr-body' }, kicker(s), el('h2', { text: s.title }), s.dek ? el('p', { class: 'dek big', text: s.dek }) : null,
         el('div', { class: 'fine', text: (s.dek ? 'Teaser from ' + (s.reports.find((r) => r.u === s.link) || {}).o + '. ' : '') + 'First reported ' + dshort(s.first) + ', ' + hm(s.first) + ' · latest ' + hm(s.last) }),
-        m ? el('div', { class: 'tiles', style: { marginTop: '14px' } }, tile(m, true)) : null,
+        m ? el('div', { class: 'mts one', style: { marginTop: '16px' } }, tile(m, true, 'today')) : null,
         el('div', { class: 'dr-act' }, el('a', { class: 'btn pri', href: s.link, target: '_blank', rel: 'noopener noreferrer' }, 'Read the full story ↗'), saveBtn(s),
           el('button', { class: 'btn', onclick: () => copy([s]), text: '⧉ Copy' }), navigator.share ? el('button', { class: 'btn', onclick: () => navigator.share({ title: s.title, url: s.link }).catch(() => {}), text: '↗ Share' }) : null),
         el('h5', { text: 'How sure is this?' }), el('div', { class: 'explain', text: sure }),
@@ -590,7 +600,7 @@
   function chapterBounds() { const sl = BM.slides; let a = BM.i; while (a > 0 && sl[a].t !== 'chapter' && sl[a].t !== 'intro') a--; let b = BM.i + 1; while (b < sl.length && sl[b].t !== 'chapter' && sl[b].t !== 'outro') b++; return [a, b]; }
   function showSlide(dir) {
     const sl = BM.slides, x = sl[BM.i], stage = clear($('bmStage')), c = x.c;
-    $('bm').style.setProperty('--c', c ? cv(c) : 'var(--accent)');
+    $('bm').style.setProperty('--c', c ? cv(c) : '#818CF8');
     const [a, b] = chapterBounds(); const bars = clear($('bmBars'));
     for (let k = a; k < b; k++) bars.append(el('i', { class: k < BM.i ? 'done' : k === BM.i ? 'now' : '' }));
     const stories = sl.filter((y) => y.t === 'story'), sn = sl.slice(0, BM.i + 1).filter((y) => y.t === 'story').length;
@@ -602,14 +612,14 @@
       card.append(el('div', { class: 'sl-in' }, el('div', { class: 'big-hi', text: greet() + '.' }),
         el('p', { class: 'lede', text: `Here is ${DAY ? 'that day' : 'the world right now'} in ${stories.length} stories across ${sl.filter((y) => y.t === 'chapter').length} areas. About ${Math.max(2, Math.round(stories.length * 0.25))} minutes.` }),
         sinceMode() ? el('p', { class: 'fine', text: 'Last visit: ' + ago(since) }) : null,
-        mv.length ? el('div', { class: 'tiles' }, mv.map((m) => tile(m, false, 'today'))) : null,
+        mv.length ? el('div', { class: 'mts' }, mv.map((m) => tile(m, false, 'today'))) : null,
         el('div', { class: 'chips big' }, sl.filter((y) => y.t === 'chapter').map((y) => el('button', { style: { '--c': cv(y.c) }, onclick: (e) => { e.stopPropagation(); BM.i = sl.indexOf(y); showSlide(1); } }, el('i'), SHORT[y.c]))),
         el('button', { class: 'btn pri big', onclick: (e) => { e.stopPropagation(); step(1); } }, 'Start  →')));
     } else if (x.t === 'chapter') {
       const L = storiesOf(c), ms = (MKT[c] || []).map((k) => MK[k]).filter((m) => m && isNum(m.p)).slice(0, 4);
       card.append(el('div', { class: 'sl-in center' }, el('div', { class: 'ch-ic', text: ICON[c] }), el('h1', { text: cname(c) }),
         el('p', { class: 'lede', text: `${x.n} confirmed ${x.n === 1 ? 'story' : 'stories'} today · ${L.length} in total` }),
-        ms.length ? el('div', { class: 'tiles' }, ms.map((m) => tile(m, false, 'today'))) : null,
+        ms.length ? el('div', { class: 'mts' }, ms.map((m) => tile(m, false, 'today'))) : null,
         el('ul', { class: 'ch-list' }, L.filter(quality).slice(0, 4).map((s) => el('li', { text: s.title })))));
     } else if (x.t === 'story') {
       const s = x.s; markSeen(s.id);
@@ -628,7 +638,7 @@
     paintAll(card);
     $('bmPrev').disabled = BM.i === 0;
   }
-  function paintAll(root) { root.querySelectorAll('.art').forEach((b) => paint(b)); }
+  function paintAll(root) { root.querySelectorAll('.art').forEach((b) => paint(b)); runCounts(root); }
   (function wireBrief() {
     const st = $('bmStage'); let sx = 0, sy = 0, t0 = 0;
     st.addEventListener('pointerdown', (e) => { sx = e.clientX; sy = e.clientY; t0 = Date.now(); });
@@ -661,9 +671,6 @@
       getJSON('data/archive/index.json').then((x) => { DAYS = x.days || []; renderTop(); }).catch(() => {});
     } catch (e) { /* offline: keep what we have */ }
   }
-  function applyTheme(t) { document.documentElement.dataset.theme = t; $('theme').textContent = t === 'dark' ? '☀' : '☾'; const mt = document.querySelector('meta[name=theme-color]'); if (mt) mt.content = t === 'dark' ? '#0C0D10' : '#F6F4EF'; }
-  let theme = S.get('theme', matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'); applyTheme(theme);
-  $('theme').onclick = () => { theme = theme === 'dark' ? 'light' : 'dark'; S.set('theme', theme); applyTheme(theme); };
   $('bell').classList.toggle('on', alerts);
   $('bell').onclick = async () => {
     if (!alerts && 'Notification' in window && Notification.permission !== 'granted') { try { await Notification.requestPermission(); } catch (e) { /* */ } }

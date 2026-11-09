@@ -42,6 +42,8 @@ GROUP_GAP = 18 * 3600
 CATS = ["world", "war", "economy", "forex", "commodities", "energy", "crypto", "home", "tech", "science", "sport"]
 TOP_CAP = {"world": 3, "war": 3, "economy": 3, "forex": 2, "commodities": 2, "energy": 2, "crypto": 2, "home": 2, "tech": 2, "science": 1, "sport": 1}
 MARKET_CATS = ["energy", "commodities", "forex", "crypto", "economy"]
+# sites that mostly republish other newsrooms' stories: shown, but never counted as an independent confirmation
+AGGREGATORS = {"Yahoo Finance", "Investing.com"}
 TIER_RANK = {"official": 0, "major": 1, "news": 2, "regional": 3}
 
 RX = {
@@ -258,7 +260,7 @@ def group(items):
             if shared < 3:
                 continue
             sc = shared / max(1, min(len(tok), len(s["core"])))
-            if sc >= 0.45 and sc > best_s:
+            if sc >= 0.5 and sc > best_s:
                 best, best_s = s, sc
         if best is None:
             stories.append({"tok": set(tok), "core": set(tok), "items": [it], "first": it["ts"], "last": it["ts"]})
@@ -297,10 +299,11 @@ def build(stories, conf, now):
                    + sorted(its, key=lambda i: (TIER_RANK.get(i["tier"], 3), -i["ts"])) if i.get("d")), "")
         h = hot_of(text)
         pl = geo.places(lead["title"] + " · " + " · ".join(i["title"] for i in its[:6]), MAP)
-        n = len(orgs)
-        status = "OFFICIAL" if official else "VERIFIED" if n >= 2 else "1 SOURCE"
+        indep = sorted({i["org"] for i in its if i["org"] not in AGGREGATORS})
+        n = len(indep)                     # independent newsrooms (the two-source rule)
+        status = "OFFICIAL" if official else "VERIFIED" if n >= 2 else "UNCONFIRMED"
         age_h = (now - s["last"]) / 3600
-        developing = s["first"] < now - 24 * 3600 and s["last"] >= now - 8 * 3600 and n >= 2
+        developing = s["first"] < now - 24 * 3600 and s["last"] >= now - 8 * 3600 and status != "UNCONFIRMED"
         breaking = (n >= 3 and s["first"] >= now - 3 * 3600) or (official and h >= 4 and s["first"] >= now - 2 * 3600)
         score = n * 3 + (4 if official else 0) + (1 if major else 0) + h - age_h * 0.35 + (1.5 if developing else 0)
         seen_org, reports = set(), []
@@ -310,7 +313,7 @@ def build(stories, conf, now):
             seen_org.add(i["org"])
             reports.append({"o": i["org"], "t": i["title"], "u": i["link"], "ts": int(i["ts"])})
         sid = hashlib.sha1(sorted(its, key=lambda i: i["ts"])[0]["link"].encode()).hexdigest()[:10]
-        out.append({"id": sid, "cat": cat, "title": lead["title"], "dek": dk, "link": lead["link"], "orgs": orgs, "n": n, "status": status,
+        out.append({"id": sid, "cat": cat, "title": lead["title"], "dek": dk, "link": lead["link"], "orgs": orgs, "indep": indep, "n": n, "status": status,
                     "first": int(s["first"]), "last": int(s["last"]), "score": round(score, 2), "hot": h,
                     "places": pl, "home": cat == "home" or any(p["c"] in homes for p in pl), "kw": kw_of(text),
                     "also": [k for k in MARKET_CATS if k != cat and RX[k].search(text)][:3],
@@ -364,8 +367,19 @@ def markets():
                             "spark": thin((r.get("sparkline_in_7d") or {}).get("price") or []), "src": "CoinGecko", "g": "crypto"})
     except Exception:  # noqa
         out += [{"k": k, "name": n, "sym": k.upper(), "p": None, "err": True, "g": "crypto"} for k, _, n in COINS]
+    for m in out:                       # second opinion on crypto prices
+        if m.get("p"):
+            try:
+                cb = float(get_json(f"https://api.coinbase.com/v2/prices/{m['sym']}-USD/spot", timeout=10)["data"]["amount"])
+                m["chk"] = {"src": "Coinbase", "p": cb, "diff": round((m["p"] / cb - 1) * 100, 3)}
+                m["ok"] = abs(m["chk"]["diff"]) < 1.0
+            except Exception:  # noqa
+                pass
     with ThreadPoolExecutor(6) as ex:
         out += list(ex.map(yahoo, YAHOO))
+    for m in out:                       # sanity checks: no zero, negative or wildly jumping prices
+        if m.get("p") is not None and (m["p"] <= 0 or (m.get("chg") is not None and abs(m["chg"]) > 40)):
+            m.update(p=None, err=True)
     fng = None
     try:
         d = get_json("https://api.alternative.me/fng/?limit=8", timeout=15)["data"]
@@ -384,8 +398,8 @@ def ai_brief(top, conf):
     lines = "\n".join(f'[{s["id"]}] ({s["cat"]}, {s["status"]}, {s["n"]} outlets) {s["title"]}' for s in top[:25])
     prompt = ("Below are today's most important news headlines, already ranked. Write 'The day in 60 seconds': 6 to 8 short lines that together give a busy "
               "reader the overall picture of the day across world, war, economy and markets, crypto, tech and anything else big. One line per story or theme, "
-              "most important first, plain neutral language, no opinions, no predictions, and nothing that is not in the headlines. Mark single-source stories "
-              f"as unconfirmed. Write in {lang}. Reply with JSON only: {{\"lines\":[{{\"text\":\"...\",\"ids\":[\"story id\"]}}]}}\n\n" + lines)
+              "most important first, plain neutral language, no opinions, no predictions, and nothing that is not in the headlines. Every story here is already "
+              f"confirmed by two or more newsrooms or an official source. Write in {lang}. Reply with JSON only: {{\"lines\":[{{\"text\":\"...\",\"ids\":[\"story id\"]}}]}}\n\n" + lines)
     body = json.dumps({"model": conf.get("summary_model") or "claude-haiku-5-5", "max_tokens": 900, "messages": [{"role": "user", "content": prompt}]}).encode()
     try:
         j = json.loads(get("https://api.anthropic.com/v1/messages", timeout=60, data=body,
@@ -406,7 +420,7 @@ def auto_brief(stories):
         if s["cat"] in used or s["n"] < 1:
             continue
         used.add(s["cat"])
-        lines.append({"text": s["title"] + ("" if s["n"] > 1 or s["status"] == "OFFICIAL" else " (one source so far)"), "ids": [s["id"]], "cat": s["cat"]})
+        lines.append({"text": s["title"], "ids": [s["id"]], "cat": s["cat"]})
         if len(lines) == 7:
             break
     return {"by": "auto", "lines": lines}
@@ -439,6 +453,9 @@ def run(verbose=True):
 
     stories = build(group(list(store.values())), conf, now)
     day = [s for s in stories if s["last"] >= now - 24 * 3600]
+    unconfirmed = sum(1 for s in day if s["status"] == "UNCONFIRMED")
+    if conf.get("verified_only", True):   # only stories confirmed by 2+ independent newsrooms, or from an official source
+        day = [s for s in day if s["status"] != "UNCONFIRMED"]
     day.sort(key=lambda s: -s["score"])
     by = {k: [s for s in day if s["cat"] == k] for k in CATS}
     keep = []
@@ -491,7 +508,8 @@ def run(verbose=True):
     local_date = (datetime.fromtimestamp(now, timezone.utc) + off).strftime("%Y-%m-%d")
     out = {"updated": int(now), "date": local_date, "utc_offset_hours": float(conf.get("utc_offset_hours", 0)), "home_title": conf.get("home_title", "Home"),
            "home_countries": conf.get("home_countries", []), "watchlist_default": conf.get("watchlist_default", []),
-           "stories": final, "top": top, "counts": {k: len(by[k]) for k in CATS}, "total": len(day),
+           "stories": final, "top": top, "counts": {k: len(by[k]) for k in CATS}, "total": len(day), "unconfirmed_hidden": unconfirmed if conf.get("verified_only", True) else 0,
+           "rule": "Shown only when 2+ independent newsrooms report it, or it comes from an official source",
            "outlets": len({o for s in day for o in s["orgs"]}), "reports": sum(len(s["reports"]) for s in day),
            "brief": brief, "markets": mk, "fng": fng, "pulse": {"start": h0, "cats": pulse},
            "feeds": {"ok": ok, "total": len(feeds), "list": health}}

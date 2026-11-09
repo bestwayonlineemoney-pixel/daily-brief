@@ -2,12 +2,13 @@
 
 The whole day, sorted and easy to read. Every few minutes it reads about 90 newsrooms and official sources (BBC, Al Jazeera, NYT, Guardian, DW, CNBC, CoinDesk, OilPrice, FXStreet, Mining.com, The Verge, NASA, WHO, the Fed, the SEC, the EIA, the UN, Ada Derana, EconomyNext, The National and others). It then:
 
-- groups the same story from different outlets into one, and marks it **✓ sources** (confirmed by 2+ newsrooms), **◆ Official**, or **1 source** (single-source headlines are tucked away under "More headlines")
+- shows **only confirmed news**: a story appears only when 2 or more independent newsrooms report it, or when it comes straight from an official source. Single-source reports are kept out, and sites that mostly republish others never count as a confirmation. Crypto prices are checked against a second source
 - opens with **While you were away**: what's new and what's been updated since your last visit, plus how prices moved since then
 - sorts everything into chapters (World, War, Economy & stocks, Forex, Commodities, Energy, Crypto, your home region, Tech & AI, Science, Sport), each split into sub-topics such as Oil / Gas & LNG / Power, or Bitcoin / ETFs & regulators / Hacks
 - has a **5-minute brief**: a full-screen, swipe-through version of the day, one story per screen and chapter by chapter
 - shows each story's one-line teaser from the outlet, every report in order, and a picture drawn from data (a globe with the place marked, a price chart and so on; no news photos)
-- lets you switch between light and dark, save stories, copy them with their sources, search, set watch words, get alerts, and look back at earlier days
+- has a dark glass design with smooth animations, a live 3D globe and a bento layout
+- lets you save stories, copy them with their sources, search, set watch words, get alerts, and look back at earlier days
 
 It needs only Python. There's nothing to install with pip.
 

@@ -1,45 +1,48 @@
 <!doctype html>
-<html lang="en" data-theme="dark"><head>
+<html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>The Daily Brief</title>
-<meta name="description" content="The whole day, sorted and easy to read: the stories that matter across the world, war, economy, forex, commodities, energy, crypto and tech, cross-checked across newsrooms.">
-<meta name="theme-color" content="#0C0D10">
+<meta name="description" content="Only confirmed news. The whole day across world, war, economy, forex, commodities, energy, crypto and tech, each story reported by two or more independent newsrooms or an official source.">
+<meta name="theme-color" content="#05060A">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon-192.png">
 <link rel="stylesheet" href="vendor/fonts.css">
 <link rel="stylesheet" href="app.css">
-<script src="theme.js"></script>
 </head><body>
-<div class="tick"><div class="tick-run" id="tick"></div></div>
-<header class="top">
-  <div class="top-in">
-    <a class="brand" href="#" id="home" aria-label="The Daily Brief, overview"><span class="logo" aria-hidden="true"></span><span class="bn">The Daily <i>Brief</i></span></a>
-    <div class="datebox"><button class="ib sm" id="prevDay" title="Previous day" aria-label="Previous day">‹</button><span id="dateTxt"></span><button class="ib sm" id="nextDay" title="Next day" aria-label="Next day">›</button></div>
-    <label class="search"><span aria-hidden="true">⌕</span><input id="q" type="search" placeholder="Search today's news" autocomplete="off" aria-label="Search"></label>
+<div class="aurora" aria-hidden="true"><i class="a1"></i><i class="a2"></i><i class="a3"></i></div>
+<div class="grain" aria-hidden="true"></div>
+
+<header class="nav-wrap">
+  <div class="nav glass">
+    <a class="brand" href="#" id="home" aria-label="The Daily Brief, overview"><span class="logo" aria-hidden="true"></span><span class="bn">Daily<b>Brief</b></span></a>
+    <nav class="chap" id="nav" aria-label="Chapters"></nav>
     <div class="acts">
-      <button class="ib only-m" id="searchBtn" title="Search" aria-label="Search">⌕</button>
-      <button class="btn pri play" id="playBtn" title="Play the 5-minute brief">▶ <span>5-min brief</span></button>
+      <div class="day"><button class="ib sm" id="prevDay" aria-label="Previous day">‹</button><span id="dayTxt">Today</span><button class="ib sm" id="nextDay" aria-label="Next day">›</button></div>
+      <label class="search"><span aria-hidden="true">⌕</span><input id="q" type="search" placeholder="Search" autocomplete="off" aria-label="Search"></label>
+      <button class="ib only-m" id="searchBtn" aria-label="Search">⌕</button>
       <button class="ib" id="watchBtn" title="Your watch words" aria-label="Watch words">★</button>
       <button class="ib" id="bell" title="Alerts for breaking news and your watch words" aria-label="Alerts">🔔</button>
-      <button class="ib" id="theme" title="Light or dark" aria-label="Light or dark">☾</button>
+      <button class="btn grad-btn sm play" id="playBtn" title="Play the 5-minute brief"><span class="play">▶</span><span class="pt">Brief</span></button>
     </div>
   </div>
-  <nav class="chap" id="nav" aria-label="Chapters"></nav>
+  <div class="tick"><div class="tick-run" id="tick"></div></div>
 </header>
+
 <main id="main" class="wrap"></main>
-<footer class="wrap foot" id="foot"></footer>
+<footer class="wrap" id="foot"></footer>
 
 <aside class="drawer" id="drawer" aria-hidden="true"><div class="dr-shade" id="drShade"></div><div class="dr-panel" id="drPanel" role="dialog" aria-modal="true" aria-label="Story"></div></aside>
 
 <div class="bm" id="bm" aria-hidden="true" role="dialog" aria-label="The 5-minute brief">
+  <div class="bm-glow" aria-hidden="true"></div>
   <div class="bm-top">
     <div class="bm-bars" id="bmBars"></div>
     <div class="bm-row"><span class="bm-where" id="bmWhere"></span><span class="bm-count" id="bmCount"></span><button class="lnk" id="bmSkip">Skip chapter ›</button><button class="ib" id="bmClose" aria-label="Close">✕</button></div>
   </div>
   <div class="bm-stage" id="bmStage"></div>
-  <div class="bm-nav"><button class="ib" id="bmPrev" aria-label="Previous">‹</button><span class="fine">Tap or swipe</span><button class="ib" id="bmNext" aria-label="Next">›</button></div>
+  <div class="bm-nav"><button class="ib" id="bmPrev" aria-label="Previous">‹</button><span class="fine">Tap or swipe · ← →</span><button class="ib" id="bmNext" aria-label="Next">›</button></div>
 </div>
 <div class="tip" id="tip" hidden></div>
 <div class="toast" id="toast" hidden></div>
