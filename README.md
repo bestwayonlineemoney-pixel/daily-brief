@@ -1,0 +1,53 @@
+# The Daily Brief
+
+The whole day in one page. Every few minutes it reads about 80 newsrooms and official sources (BBC, Al Jazeera, NYT, Guardian, DW, CNBC, CoinDesk, The Verge, NASA, WHO, the Fed, the SEC, the UN, Ada Derana, EconomyNext, The National and others). It then:
+
+- groups the same story from different outlets into one story, and marks it **VERIFIED** (2+ newsrooms), **OFFICIAL** (a government body, central bank, regulator or agency) or **1 SOURCE** (not confirmed yet)
+- ranks the day's stories, so the biggest ones are on top
+- puts each story on a live 3D globe, and draws a picture for every story: a globe with the place marked, a price chart, climate stripes, a pitch and so on (no news photos)
+- shows *The day in 60 seconds*, developing stories, how busy the news was hour by hour, where the news is happening, and markets at a glance
+- includes a section for your home region (default: **Sri Lanka & Gulf**)
+- lets you save stories, copy them with their sources, search, set watch words, get pop-up alerts, and look back at any earlier day
+
+It needs only Python. There's nothing to install with pip.
+
+## Run it on your PC
+
+1. Install Python 3.9 or newer from python.org. During setup, tick **Add python.exe to PATH**.
+2. Double-click **start.bat**. Your browser opens at http://localhost:8900 and the page fills itself within about a minute.
+3. Keep the black window open; you can minimise it. To start the app automatically with Windows, run **autostart.bat** once.
+
+**On your phone:** if Tailscale is set up, run `tailscale serve --bg 8900` once on the PC, then open the address it prints on your phone. In the phone browser menu, choose **Add to Home screen** so it opens like an app.
+
+## Run it 24/7 for free, with your PC off (GitHub)
+
+1. Make a free account at github.com. Create a new **public** repository called `daily-brief` and upload everything in this folder. Don't upload `brief.env` or `state/`.
+2. In the repository, go to **Settings → Pages → Build and deployment → Source** and choose **GitHub Actions**.
+3. Open the **Actions** tab, select **Daily Brief**, and click **Run workflow**. After that it runs by itself every 15 minutes.
+4. Your page is at `https://YOUR-NAME.github.io/daily-brief/`. Open it on your phone and add it to your home screen.
+
+The page is public, so anyone with the link can see it. That's fine for news. Your saved stories and watch words stay in your own browser.
+
+## Optional: AI-written "day in 60 seconds"
+
+Without a key, the app shows the top story from each area. With a key, an AI writes 6–8 short lines from the day's headlines.
+
+- **On your PC:** copy `brief.env.example` to `brief.env` and put your key after `ANTHROPIC_API_KEY=`.
+- **On GitHub:** go to **Settings → Secrets and variables → Actions → New repository secret**. Name it `ANTHROPIC_API_KEY`.
+
+To get the summary in another language, set `"summary_language"` in `config.json`, for example `"Sinhala"`. Never paste the key into a chat or put it in any other file.
+
+## Change sources or your region
+
+Edit `config.json`:
+
+- `feeds`: add or remove any RSS feed (`cat` is one of world, war, economy, crypto, tech, science, sport, home)
+- `home_title` and `home_countries`: your home region
+- `utc_offset_hours`: when your day starts (4 = Dubai, 5.5 = Sri Lanka)
+- `watchlist_default`: your starting watch words
+
+The footer of the page shows which sources were reachable on the last update.
+
+## What is stored
+
+Only each headline, the outlet, the time and the link are stored. The app never stores article text or photos; you read the full story on the outlet's own site. Prices come from CoinGecko and Yahoo Finance, and the Fear & Greed index from alternative.me. These numbers are for the big picture, not for trading.

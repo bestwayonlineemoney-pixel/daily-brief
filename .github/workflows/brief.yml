@@ -1,0 +1,56 @@
+# Runs The Daily Brief in GitHub's cloud every 15 minutes and publishes it on GitHub Pages.
+# Your computer can be off. Setup steps are in README.md.
+name: Daily Brief
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+concurrency:
+  group: brief
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Restore memory of earlier runs
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            state
+            site/data
+          key: brief-${{ github.run_id }}
+          restore-keys: brief-
+      - name: Collect the news
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: python collector/collect.py
+      - name: Save memory for the next run
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            state
+            site/data
+          key: brief-${{ github.run_id }}
+      - name: Keep the archive in the repository once a day
+        run: |
+          if [ "$(date -u +%H)" = "20" ] && [ "$(date -u +%M)" -lt "15" ]; then
+            git config user.name "daily-brief-bot"; git config user.email "actions@users.noreply.github.com"
+            git add -f site/data/archive && git commit -m "Archive $(date -u +%F)" && git push || true
+          fi
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deploy
+        uses: actions/deploy-pages@v4

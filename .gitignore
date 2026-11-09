@@ -1,0 +1,5 @@
+brief.env
+state/
+__pycache__/
+*.tmp
+site/data/today.json

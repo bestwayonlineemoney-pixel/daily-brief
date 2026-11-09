@@ -1,0 +1,10 @@
+@font-face{font-family:'Anton';font-weight:400;font-display:swap;src:url(fonts/anton-latin-400-normal.woff2) format('woff2');unicode-range:U+0000-00FF,U+2000-206F,U+20AC,U+2122,U+2191,U+2193}
+@font-face{font-family:'Anton';font-weight:400;font-display:swap;src:url(fonts/anton-latin-ext-400-normal.woff2) format('woff2');unicode-range:U+0100-02BA,U+1E00-1E9F,U+20A0-20AB,U+20AD-20C0}
+@font-face{font-family:'Plus Jakarta Sans';font-weight:400;font-display:swap;src:url(fonts/plus-jakarta-sans-latin-400-normal.woff2) format('woff2')}
+@font-face{font-family:'Plus Jakarta Sans';font-weight:500;font-display:swap;src:url(fonts/plus-jakarta-sans-latin-500-normal.woff2) format('woff2')}
+@font-face{font-family:'Plus Jakarta Sans';font-weight:600;font-display:swap;src:url(fonts/plus-jakarta-sans-latin-600-normal.woff2) format('woff2')}
+@font-face{font-family:'Plus Jakarta Sans';font-weight:700;font-display:swap;src:url(fonts/plus-jakarta-sans-latin-700-normal.woff2) format('woff2')}
+@font-face{font-family:'Plus Jakarta Sans';font-weight:800;font-display:swap;src:url(fonts/plus-jakarta-sans-latin-800-normal.woff2) format('woff2')}
+@font-face{font-family:'JetBrains Mono';font-weight:400;font-display:swap;src:url(fonts/jetbrains-mono-latin-400-normal.woff2) format('woff2')}
+@font-face{font-family:'JetBrains Mono';font-weight:500;font-display:swap;src:url(fonts/jetbrains-mono-latin-500-normal.woff2) format('woff2')}
+@font-face{font-family:'JetBrains Mono';font-weight:600;font-display:swap;src:url(fonts/jetbrains-mono-latin-600-normal.woff2) format('woff2')}
