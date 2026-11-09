@@ -577,17 +577,21 @@ def upcoming_releases(now):
 def macro(now):
     """Official statistics change monthly or weekly, so fetch them at most every 3 hours."""
     cache = read(STATE / "macro.json", {})
-    if cache.get("at", 0) > now - 3 * 3600 and any(not r.get("err") for r in cache.get("rows", [])):
+    fresh = cache.get("at", 0) > now - 3 * 3600
+    good = {r["k"]: r for r in cache.get("rows", []) if not r.get("err")}
+    todo = [m for m in MACRO if not (fresh and m[0] in good)]      # within 3 hours only the missing ones are tried again
+    if not todo:
         return cache
     with ThreadPoolExecutor(6) as ex:
-        rows = list(ex.map(macro_one, MACRO))
+        got = {r["k"]: r for r in ex.map(macro_one, todo)}
+    rows = [got.get(m[0]) or good.get(m[0]) for m in MACRO]
     old = {r["k"]: r for r in cache.get("rows", []) if not r.get("err")}
     rows = [old.get(r["k"], r) if r.get("err") else r for r in rows]     # a source is down: keep the last good number
     bad = [r for r in rows if r.get("err")]
     if bad:
         print(f"  macro: {len(bad)} series not available:", "; ".join(f"{r['k']} ({r['err']})" for r in bad[:6]), flush=True)
     print("  macro sources used:", ", ".join(f"{r['k']}={r.get('got')}" for r in rows if not r.get("err")), flush=True)
-    out = {"at": int(now), "rows": rows, "calendar": upcoming_releases(now) or cache.get("calendar")}
+    out = {"at": int(now) if not fresh else cache["at"], "rows": rows, "calendar": (upcoming_releases(now) if not fresh or not cache.get("calendar") else None) or cache.get("calendar")}
     write(STATE / "macro.json", out)
     return out
 
