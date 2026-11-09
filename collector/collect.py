@@ -407,8 +407,8 @@ MACRO = [
     ("us_retail", "Retail sales (month)", "United States", "Growth", "mom", "US Census Bureau", [("fred", "RSAFS"), ("fredcsv", "RSAFS")]),
     ("us_sent", "Consumer sentiment", "United States", "Growth", "level", "Univ. of Michigan", [("fred", "UMCSENT"), ("fredcsv", "UMCSENT")]),
     ("ea_rate", "ECB deposit rate", "Euro area", "Rates", "level%", "ECB", [("ecb", "FM/D.U2.EUR.4F.KR.DFR.LEV"), ("fred", "ECBDFR"), ("fredcsv", "ECBDFR")]),
-    ("ea_cpi", "Inflation (HICP)", "Euro area", "Inflation", "yoy", "Eurostat / ECB", [("ecb", "ICP/M.U2.N.000000.4.ANR", "level%"), ("fred", "CP0000EZ19M086NEST"), ("fredcsv", "CP0000EZ19M086NEST")]),
-    ("ea_unemp", "Unemployment rate", "Euro area", "Jobs", "level%", "Eurostat", [("eurostat", "une_rt_m?geo=EA20&s_adj=SA&age=TOTAL&sex=T&unit=PC_ACT"), ("fred", "LRHUTTTTEZM156S")]),
+    ("ea_cpi", "Inflation (HICP)", "Euro area", "Inflation", "yoy", "Eurostat / ECB", [("ecb", "ICP/M.U2.N.000000.4.ANR", "level%"), ("dbn", "Eurostat/prc_hicp_manr/M.RCH_A.CP00.EA", "level%"), ("dbn", "Eurostat/prc_hicp_manr/M.RCH_A.CP00.EA20", "level%"), ("fred", "CP0000EZ19M086NEST"), ("fredcsv", "CP0000EZ19M086NEST")]),
+    ("ea_unemp", "Unemployment rate", "Euro area", "Jobs", "level%", "Eurostat", [("eurostat", "une_rt_m?geo=EA20&s_adj=SA&age=TOTAL&sex=T&unit=PC_ACT"), ("dbn", "Eurostat/une_rt_m/M.SA.TOTAL.PC_ACT.T.EA20"), ("dbn", "Eurostat/une_rt_m/M.SA.TOTAL.PC_ACT.T.EA"), ("fred", "LRHUTTTTEZM156S")]),
     ("uk_rate", "Bank of England rate", "United Kingdom", "Rates", "level%", "Bank of England", [("boe", "IUDBEDR"), ("fred", "BOERUKM"), ("fredcsv", "BOERUKM")]),
     ("uk_cpi", "Inflation (CPI)", "United Kingdom", "Inflation", "yoy", "ONS", [("dbn", "ONS/MM23/D7G7.M", "level%"), ("fred", "GBRCPIALLMINMEI"), ("fredcsv", "GBRCPIALLMINMEI")]),
     ("jp_cpi", "Inflation (CPI)", "Japan", "Inflation", "yoy", "Statistics Japan", [("fred", "JPNCPIALLMINMEI"), ("fredcsv", "JPNCPIALLMINMEI")]),
@@ -478,7 +478,7 @@ def src_fetch(kind, sid, start):
         rows.sort()
     elif kind == "ecb":
         flow, key = sid.split("/", 1)
-        txt = get(f"https://data-api.ecb.europa.eu/service/data/{flow}/{key}?format=csvdata&startPeriod={start[:7]}", timeout=25, headers={"Accept": "text/csv"}).decode("utf-8", "replace")
+        txt = get(f"https://data-api.ecb.europa.eu/service/data/{flow}/{key}?format=csvdata&startPeriod={start[:7]}", timeout=50, headers={"Accept": "text/csv"}).decode("utf-8", "replace")
         rows = [(_d(r["TIME_PERIOD"]), _num(r["OBS_VALUE"])) for r in _csv_rows(txt)]
     elif kind == "eurostat":
         ds, q = sid.split("?", 1)
