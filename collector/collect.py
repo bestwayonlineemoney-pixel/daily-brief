@@ -29,6 +29,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import geo  # noqa: E402
+import trader  # noqa: E402
 
 HOME = Path(__file__).resolve().parent.parent
 SITE = HOME / "site"
@@ -693,6 +694,12 @@ def run(verbose=True):
 
     mk, fng = markets()
     mac = macro(now)
+    trader.setup(get, get_json, read, write, STATE)
+    try:
+        tr = trader.run(day, final, mk, fng, mac.get("calendar"), conf.get("watchlist_default", []), now)
+    except Exception as e:  # noqa  - the trader layer must never stop the news
+        print("  trader layer error:", repr(e)[:200], flush=True)
+        tr = {}
 
     # summary: AI when a key is set (refreshed at most every 45 min or when the top changes), otherwise built from the top stories
     prev = read(DATA / "today.json", {})
@@ -719,7 +726,7 @@ def run(verbose=True):
            "stories": final, "top": top, "counts": {k: len(by[k]) for k in CATS}, "total": len(day), "unconfirmed_hidden": unconfirmed if conf.get("verified_only", True) else 0,
            "rule": "Shown only when 2+ independent newsrooms report it, or it comes from an official source",
            "outlets": len({o for s in day for o in s["orgs"]}), "reports": sum(len(s["reports"]) for s in day),
-           "brief": brief, "markets": mk, "fng": fng, "macro": mac.get("rows", []), "calendar": mac.get("calendar"), "pulse": {"start": h0, "cats": pulse},
+           "brief": brief, "markets": mk, "fng": fng, "macro": mac.get("rows", []), "calendar": mac.get("calendar"), "trader": tr, "pulse": {"start": h0, "cats": pulse},
            "feeds": {"ok": ok, "total": len(feeds), "list": health}}
     write(DATA / "today.json", out)
 
