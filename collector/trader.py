@@ -41,6 +41,7 @@ BEAR = {"plunge": 3, "crash": 3, "slump": 2, "tumble": 2, "falls": 1, "drop": 1,
         "ban": 2, "lawsuit": 2, "sues": 2, "probe": 1, "investigat": 1, "outflow": 2, "liquidat": 2, "sell-off": 2, "selloff": 2, "rate hike": 2,
         "hikes rate": 2, "hotter": 2, "tariff": 1, "sanction": 1, "war ": 1, "missile": 2, "airstrike": 1, "drone strike": 1, "attack": 2, "default": 3, "bankrupt": 3,
         "fraud": 2, "arrest": 1, "delay": 1, "reject": 2, "warns": 1, "fear": 1, "recession": 2, "shutdown": 1, "halt": 1, "closure": 1, "escalat": 2, "below $": 1}
+HAWK = re.compile(r"not a done deal|cools? .*cut|fewer (rate )?cuts|no rush|pushes? back .*cut|delay\w* .*cut|trim\w* (bets on )?.*cut|hawkish|higher for longer", re.I)
 CRITICAL = re.compile(r"\b(etfs?|hack|exploit|rate cut|rate hike|cpi|inflation data|fomc|fed decision|liquidation|sec|ban|approv\w*|default|"
                       r"bankrupt\w*|jobs report|payrolls|nonfarm|tariffs?|hormuz|invasion|nuclear|emergency)\b", re.I)
 ASSETS = [("BTC", r"\bbitcoin|\bbtc\b"), ("ETH", r"\bether(eum)?\b|\beth\b"), ("SOL", r"\bsolana\b|\bsol\b"), ("XRP", r"\bxrp\b|\bripple\b"),
@@ -55,8 +56,8 @@ WHY = [  # (pattern, the one-line "why it matters")
     (r"etf.*outflow|outflow.*etf", "ETF outflows mean funds are selling, a drag on price."),
     (r"\bapprov\w*\b.*\b(sec|etf)|\bsec\b.*\bapprov", "A regulator's approval opens the door to new money from funds and institutions."),
     (r"hack|exploit|stolen|drain", "Hacks hit confidence and can trigger quick sell-offs in the affected tokens."),
+    (r"rate hike|hikes rates?|hawkish|not a done deal|cools.*cut|fewer (rate )?cuts|no rush|pushes? back|delay\w* .*cut|trim\w* .*cut", "Fewer or later rate cuts keep money tight: a headwind for crypto and stocks, support for the dollar."),
     (r"rate cut|cuts rates?|dovish", "Cheaper money tends to lift risk assets like crypto and stocks, and weaken the dollar."),
-    (r"rate hike|hikes rates?|hawkish|not a done deal|cools.*cut", "Fewer or later rate cuts keep money tight: a headwind for crypto and stocks, support for the dollar."),
     (r"\bcpi\b|inflation", "Inflation data moves rate expectations, which move the dollar, yields and crypto."),
     (r"payrolls|jobs report|unemployment|jobless", "Jobs data shapes the Fed's next move, so markets swing on surprises."),
     (r"hormuz|tanker|oil.*(jump|surge|soar)|opec", "Higher oil can revive inflation fears and lift the dollar, a headwind for risk assets."),
@@ -80,6 +81,9 @@ def tag_story(s):
     text = (s["title"] + " " + (s.get("dek") or "") + " " + " ".join(r["t"] for r in s.get("reports", [])[:6])).lower()
     b = sum(w for k, w in BULL.items() if k in text)
     br = sum(w for k, w in BEAR.items() if k in text)
+    if HAWK.search(text):            # "rate cut is not a done deal", "traders trim bets on a cut": tighter money, not looser
+        b -= BULL["rate cut"] if "rate cut" in text else 0
+        br += 3
     sent = "BULLISH" if b - br >= 2 else "BEARISH" if br - b >= 2 else "NEUTRAL"
     # impact 1..10: who (official), how many, how fast, what (critical words), how big (hot words)
     n = s.get("n", 1)
@@ -185,40 +189,110 @@ def find_moves(pts):
     return sorted(kept[:6], key=lambda m: m["t"])
 
 
+def relevant(s, sym):
+    """Is this story the kind that moves this market?"""
+    a = set(s.get("assets", []))
+    if sym in ("BTC", "ETH", "SOL"):
+        return sym in a or s["cat"] == "crypto" or bool(a & {"BTC", "DXY", "SPX"}) or (s.get("macro") and s.get("impact", 0) >= 6)
+    if sym == "GOLD":
+        return "GOLD" in a or bool(a & {"DXY", "OIL"}) or s["cat"] in ("war", "commodities") or s.get("macro")
+    if sym == "SPX":
+        return "SPX" in a or "DXY" in a or s.get("macro") or (s["cat"] in ("tech", "economy", "war", "energy") and s.get("impact", 0) >= 6)
+    return False
+
+
 def match_news(move, sym, stories):
     """The highest-impact confirmed story with a report within ±90 minutes of the move."""
     lo, hi = move["t0"] - 5400, move["t"] + 5400
     best, best_s = None, 0
     for s in stories:
-        if s["cat"] not in ("crypto", "economy", "forex", "energy", "war", "world", "commodities"):
-            continue
-        rel = sym in s.get("assets", []) or s["cat"] == "crypto" or s.get("macro") or bool(set(s.get("assets", [])) & {"DXY", "SPX", "OIL"})
-        if not rel:
+        if not relevant(s, sym):
             continue
         hits = [r["ts"] for r in s.get("reports", []) if lo <= r["ts"] <= hi]
         if not hits:
             continue
         near = min(abs(h - move["t"]) for h in hits)
-        sc = s.get("impact", 1) * 2 + (3 if sym in s.get("assets", []) else 0) + (2 if s["cat"] == "crypto" else 0) - near / 3600 \
+        sc = s.get("impact", 1) * 2 + (3 if sym in s.get("assets", []) else 0) - near / 3600 \
             + (1 if (s.get("sentiment") == "BULLISH") == (move["chg"] > 0) and s.get("sentiment") != "NEUTRAL" else 0)
         if sc > best_s:
             best, best_s = s, sc
     return best
 
 
+def yahoo_intraday(sym, now):
+    """15-minute prices from Yahoo Finance (exchange data, about 15 minutes delayed). Last 24h; for stocks, the last sessions."""
+    for host in ("query1", "query2"):
+        try:
+            j = _json(f"https://{host}.finance.yahoo.com/v8/finance/chart/{urllib.request.quote(sym)}?range=5d&interval=15m", timeout=20)
+            r = j["chart"]["result"][0]
+            pts = [(int(t), float(c)) for t, c in zip(r["timestamp"], r["indicators"]["quote"][0]["close"]) if c is not None]
+            day = [p for p in pts if p[0] >= now - 24 * 3600]
+            return (day if len(day) >= 24 else pts[-60:]), "Yahoo Finance · 15-min delay"
+        except Exception:  # noqa
+            continue
+    return [], None
+
+
+def price_at(pts, t):
+    best = None
+    for pt, p in pts:
+        if pt <= t:
+            best = p
+        else:
+            break
+    return best if best is not None else (pts[0][1] if pts else None)
+
+
+def markers(sym, pts, moves, stories):
+    """News pins for the chart: the important confirmed stories for this market, placed when they broke."""
+    if not pts:
+        return []
+    t0, t1 = pts[0][0], pts[-1][0]
+    cand = {}
+    for m in moves:                                  # stories that came out around a big move
+        st = next((s for s in stories if s["id"] == m.get("story")), None)
+        if st:
+            near = min((r["ts"] for r in st.get("reports", []) if t0 <= r["ts"] <= t1), key=lambda ts: abs(ts - m["t"]), default=None)
+            if near:
+                cand[st["id"]] = (st, near, m)
+    for st in stories:                               # plus the big stories of the day for this market
+        if st["id"] in cand or st.get("impact", 0) < 6 or not relevant(st, sym):
+            continue
+        ts = [r["ts"] for r in st.get("reports", []) if t0 <= r["ts"] <= t1]
+        if ts:
+            cand[st["id"]] = (st, min(ts), None)
+    chosen = sorted(cand.values(), key=lambda x: -(x[0].get("impact", 0) + (3 if x[2] else 0)))
+    keep = []
+    for st, t, m in chosen:
+        if all(abs(t - k[1]) > 40 * 60 for k in keep):
+            keep.append((st, t, m))
+        if len(keep) == 8:
+            break
+    out = []
+    for st, t, m in sorted(keep, key=lambda k: k[1]):
+        p0, p1 = price_at(pts, t), price_at(pts, t + 3600)
+        out.append({"t": t, "story": st["id"], "p": p0, "p1h": p1 if t + 3600 <= t1 else None,
+                    "chg1h": round((p1 / p0 - 1) * 100, 2) if p0 and p1 and t + 3600 <= t1 else None, "move": m["chg"] if m else None})
+    return out
+
+
 def catalysts(stories, now):
     out = {}
-    with ThreadPoolExecutor(3) as ex:
-        res = list(ex.map(lambda c: (c, candles(c[1], c[1], c[2], now)), COINS))
-    for (sym, _, _), (pts, src) in res:
-        if not pts:
+    jobs = [(sym, (lambda c=c: candles(c[1], c[1], c[2], now))) for c in COINS for sym in [c[0]]] + \
+           [("GOLD", lambda: yahoo_intraday("GC=F", now)), ("SPX", lambda: yahoo_intraday("^GSPC", now))]
+    with ThreadPoolExecutor(5) as ex:
+        res = list(ex.map(lambda j: (j[0], j[1]()), jobs))
+    for sym, (pts, src) in res:
+        if not pts or len(pts) < 12:
             continue
-        moves = find_moves(pts)
+        moves = find_moves(pts) if sym in ("BTC", "ETH", "SOL") else [m for m in find_moves(pts) if abs(m["chg"]) >= 0.4]
         for m in moves:
-            s = match_news(m, sym, stories)
-            m["story"] = s["id"] if s else None
-        out[sym] = {"src": src, "pts": [[t, round(p, 2 if p > 10 else 4)] for t, p in pts], "moves": moves,
-                    "chg24": round((pts[-1][1] / pts[0][1] - 1) * 100, 2), "hi": max(p for _, p in pts), "lo": min(p for _, p in pts)}
+            st = match_news(m, sym, stories)
+            m["story"] = st["id"] if st else None
+        nd = 2 if pts[-1][1] > 10 else 4
+        out[sym] = {"src": src, "pts": [[t, round(p, nd)] for t, p in pts], "moves": moves, "news": markers(sym, pts, moves, stories),
+                    "chg24": round((pts[-1][1] / pts[0][1] - 1) * 100, 2), "hi": max(p for _, p in pts), "lo": min(p for _, p in pts),
+                    "live": sym in ("BTC", "ETH", "SOL")}
     return out
 
 

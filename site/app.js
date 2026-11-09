@@ -494,60 +494,90 @@
         el('em', { text: e.days === 0 ? 'today' : e.days === 1 ? 'tomorrow' : 'in ' + e.days + ' days' })))), 0);
   }
 
-  /* ================= "why is it moving?" chart ================= */
-  let CAT_SYM = 'BTC';
-  function catalystCard() {
-    const C = TR().catalysts || {}; const syms = ['BTC', 'ETH', 'SOL'].filter((k) => C[k] && (C[k].pts || []).length > 10);
+  /* ================= live charts: price × news ================= */
+  let LC_SYM = 'BTC';
+  const LC_NAME = { BTC: 'Bitcoin', ETH: 'Ethereum', SOL: 'Solana', GOLD: 'Gold', SPX: 'S&P 500' };
+  const LIVEPX = {}; let LCREF = null;
+  const fmtLc = (sym, v) => !isNum(v) ? '—' : sym === 'SPX' ? v.toLocaleString(undefined, { maximumFractionDigits: 0 }) : '$' + v.toLocaleString(undefined, { maximumFractionDigits: v >= 1000 ? 0 : 2 });
+  function liveSocket() {
+    if (liveSocket.ws || !('WebSocket' in window)) return;
+    try {
+      const ws = new WebSocket('wss://ws-feed.exchange.coinbase.com'); liveSocket.ws = ws;
+      ws.onopen = () => ws.send(JSON.stringify({ type: 'subscribe', product_ids: ['BTC-USD', 'ETH-USD', 'SOL-USD'], channels: ['ticker'] }));
+      ws.onmessage = (ev) => { try { const m = JSON.parse(ev.data); if (m.type !== 'ticker') return; const sym = m.product_id.split('-')[0], p = parseFloat(m.price); const old = LIVEPX[sym]; LIVEPX[sym] = p;
+        if (LCREF && LCREF.sym === sym) LCREF.tick(p, old); } catch (e) { /* */ } };
+      ws.onclose = () => { liveSocket.ws = null; setTimeout(liveSocket, 15000); };
+      ws.onerror = () => { try { ws.close(); } catch (e) { /* */ } };
+    } catch (e) { liveSocket.ws = null; }
+  }
+  function liveChart() {
+    const C = TR().catalysts || {}; const syms = ['BTC', 'GOLD', 'SPX', 'ETH', 'SOL'].filter((k) => C[k] && (C[k].pts || []).length > 10);
     if (!syms.length) return null;
-    if (!syms.includes(CAT_SYM)) CAT_SYM = syms[0];
-    const card = el('div', { class: 'cc glass' });
+    if (!syms.includes(LC_SYM)) LC_SYM = syms[0];
+    const card = el('div', { class: 'lc glass' });
     function draw() {
-      clear(card); const X = C[CAT_SYM], pts = X.pts, up = X.chg24 >= 0;
-      const tabs = el('div', { class: 'cc-tabs' }, syms.map((k) => el('button', { class: k === CAT_SYM ? 'on' : '', onclick: (e) => { e.stopPropagation(); CAT_SYM = k; draw(); } }, k,
-        el('i', { class: C[k].chg24 >= 0 ? 'u' : 'd', text: (C[k].chg24 >= 0 ? '+' : '') + C[k].chg24.toFixed(2) + '%' }))));
-      const last = pts[pts.length - 1][1];
-      card.append(el('div', { class: 'cc-h' }, el('div', null, el('div', { class: 'eyebrow', text: 'Why is it moving?' }), el('div', { class: 'cc-p' }, cnt(last, (v) => '$' + v.toLocaleString(undefined, { maximumFractionDigits: v > 100 ? 0 : 2 }), 'cc_' + CAT_SYM),
-        el('span', { class: 'chg ' + (up ? 'u' : 'd'), text: (up ? '▲ ' : '▼ ') + Math.abs(X.chg24).toFixed(2) + '% · 24h' }))), tabs));
-      const W = 640, H = 260, pl = 6, pr = 54, pt = 18, pb = 26, t0 = pts[0][0], t1 = pts[pts.length - 1][0];
-      const lo = Math.min(...pts.map((p) => p[1])), hi = Math.max(...pts.map((p) => p[1])), pad = (hi - lo) * 0.12 || hi * 0.002;
+      clear(card); LCREF = null;
+      const sym = LC_SYM, X = C[sym], pts = X.pts, live = X.live && !DAY, upd = X.chg24 >= 0, c1 = upd ? '#34D399' : '#F87171';
+      const tabs = el('div', { class: 'lc-tabs' }, syms.map((k) => el('button', { class: k === sym ? 'on' : '', onclick: () => { LC_SYM = k; draw(); } },
+        el('b', { text: k === 'SPX' ? 'S&P 500' : k === 'GOLD' ? 'Gold' : k }), el('i', { class: C[k].chg24 >= 0 ? 'u' : 'd', text: (C[k].chg24 >= 0 ? '+' : '') + C[k].chg24.toFixed(2) + '%' }))));
+      const priceEl = el('span', { class: 'lc-p', text: fmtLc(sym, live && LIVEPX[sym] ? LIVEPX[sym] : pts[pts.length - 1][1]) });
+      const head = el('div', { class: 'lc-h' }, el('div', null, el('div', { class: 'lc-name' }, LC_NAME[sym], live ? el('span', { class: 'live' }, el('i'), 'LIVE') : el('span', { class: 'delay', text: '15-min delay' })),
+        el('div', { class: 'lc-pr' }, priceEl, el('span', { class: 'chg ' + (upd ? 'u' : 'd'), text: (upd ? '▲ ' : '▼ ') + Math.abs(X.chg24).toFixed(2) + '%' }),
+          el('span', { class: 'hl', text: 'H ' + fmtLc(sym, X.hi) + '   L ' + fmtLc(sym, X.lo) }))), tabs);
+      const W = 900, H = 400, pl = 8, pr = 70, pt = 64, pb = 28, t0 = pts[0][0], t1 = pts[pts.length - 1][0];
+      const lo = X.lo, hi = X.hi, pad = (hi - lo) * 0.1 || hi * 0.002;
       const xs = (t) => pl + (t - t0) / (t1 - t0 || 1) * (W - pl - pr), ys = (v) => pt + (1 - (v - (lo - pad)) / ((hi + pad) - (lo - pad))) * (H - pt - pb);
       const line = pts.map((p, i) => (i ? 'L' : 'M') + xs(p[0]).toFixed(1) + ' ' + ys(p[1]).toFixed(1)).join(' ');
-      const c1 = up ? '#34D399' : '#F87171';
-      let grid = ''; for (let i = 0; i <= 4; i++) { const v = lo - pad + ((hi + pad) - (lo - pad)) * i / 4, y = ys(v); grid += `<line x1="${pl}" x2="${W - pr}" y1="${y}" y2="${y}" stroke="#fff" stroke-opacity=".05"/><text x="${W - pr + 8}" y="${y + 4}" font-size="10.5" fill="#6B7080" font-family="JetBrains Mono,monospace">${v >= 1000 ? Math.round(v).toLocaleString() : v.toFixed(v > 10 ? 1 : 3)}</text>`; }
-      for (let h = 0; h <= 24; h += 6) { const t = t1 - (24 - h) * 3600; if (t < t0) continue; grid += `<text x="${xs(t)}" y="${H - 6}" font-size="10.5" fill="#6B7080" text-anchor="middle" font-family="JetBrains Mono,monospace">${h === 24 ? 'now' : hm(t)}</text>`; }
-      const s = svg(`0 0 ${W} ${H}`, `<defs><linearGradient id="ccg${++gid}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${c1}" stop-opacity=".28"/><stop offset="1" stop-color="${c1}" stop-opacity="0"/></linearGradient>
-        <filter id="glow${gid}" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
-        ${grid}<path d="${line} L${xs(t1)} ${H - pb} L${xs(t0)} ${H - pb} Z" fill="url(#ccg${gid})"/><path class="draw" d="${line}" fill="none" stroke="${c1}" stroke-width="2" stroke-linejoin="round" pathLength="1" filter="url(#glow${gid})"/>
-        <line class="xh" x1="0" x2="0" y1="${pt}" y2="${H - pb}" stroke="#fff" stroke-opacity=".25" stroke-dasharray="3 4" visibility="hidden"/>`);
-      s.setAttribute('preserveAspectRatio', 'none'); s.classList.add('cc-svg');
-      const wrap = el('div', { class: 'cc-chart' }, s), tip = el('div', { class: 'cc-tip', hidden: true }), pop = el('div', { class: 'cc-pop', hidden: true });
-      wrap.append(tip, pop);
-      (X.moves || []).forEach((m, i) => {
-        const st = m.story && BYID[m.story], upm = m.chg > 0;
-        const pin = el('button', { class: 'pin ' + (upm ? 'up' : 'dn') + (st ? '' : ' none') + (m.minor ? ' minor' : ''), style: { left: (xs(m.t) / W * 100) + '%', top: (ys(m.p) / H * 100) + '%', '--d': (i * 120 + 600) + 'ms' },
-          'aria-label': 'Move ' + fmtC(m.chg) + ' at ' + hm(m.t), onclick: (e) => { e.stopPropagation(); showPop(m, st); } }, el('i'), el('span', { text: (upm ? '+' : '') + m.chg.toFixed(1) + '%' }));
-        wrap.append(pin);
+      let grid = ''; for (let i = 0; i <= 4; i++) { const v = lo - pad + ((hi + pad) - (lo - pad)) * i / 4, y = ys(v); grid += `<line x1="${pl}" x2="${W - pr}" y1="${y}" y2="${y}" stroke="#fff" stroke-opacity=".05"/><text x="${W - pr + 10}" y="${y + 4}" font-size="11" fill="#6B7080" font-family="JetBrains Mono,monospace">${v >= 1000 ? Math.round(v).toLocaleString() : v.toFixed(v > 10 ? 1 : 3)}</text>`; }
+      const span = t1 - t0, step = span > 20 * 3600 ? 6 * 3600 : 2 * 3600; for (let t = Math.ceil(t0 / step) * step; t <= t1; t += step) grid += `<text x="${xs(t)}" y="${H - 8}" font-size="11" fill="#6B7080" text-anchor="middle" font-family="JetBrains Mono,monospace">${hm(t)}</text>`;
+      const N = (X.news || []).map((n) => Object.assign({}, n, { s: BYID[n.story] })).filter((n) => n.s);
+      let vlines = ''; N.forEach((n) => { const x = xs(n.t); vlines += `<line x1="${x}" x2="${x}" y1="${pt - 26}" y2="${ys(n.p)}" stroke="${n.s.sentiment === 'BULLISH' ? '#34D399' : n.s.sentiment === 'BEARISH' ? '#F87171' : '#A5B4FC'}" stroke-opacity=".35" stroke-dasharray="2 4"/>`; });
+      const g = svg(`0 0 ${W} ${H}`, `<defs><linearGradient id="lcg${++gid}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${c1}" stop-opacity=".25"/><stop offset="1" stop-color="${c1}" stop-opacity="0"/></linearGradient>
+        <filter id="lcf${gid}" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="3.5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
+        ${grid}${vlines}<path d="${line} L${xs(t1)} ${H - pb} L${xs(t0)} ${H - pb} Z" fill="url(#lcg${gid})"/><path class="draw" d="${line}" fill="none" stroke="${c1}" stroke-width="2.2" stroke-linejoin="round" pathLength="1" filter="url(#lcf${gid})"/>
+        <line class="xh" x1="0" x2="0" y1="${pt - 30}" y2="${H - pb}" stroke="#fff" stroke-opacity=".22" stroke-dasharray="3 4" visibility="hidden"/>`);
+      g.setAttribute('preserveAspectRatio', 'none'); g.classList.add('lc-svg');
+      const wrap = el('div', { class: 'lc-chart' }, g), tip = el('div', { class: 'cc-tip', hidden: true }), pop = el('div', { class: 'cc-pop lc-pop', hidden: true });
+      const lp = pts[pts.length - 1], nowDot = el('span', { class: 'nowdot', style: { left: (xs(lp[0]) / W * 100) + '%', top: (ys(lp[1]) / H * 100) + '%', '--c': c1 } });
+      wrap.append(nowDot, tip, pop);
+      const flags = [];
+      N.forEach((n, i) => {
+        const k = n.s.sentiment === 'BULLISH' ? 'up' : n.s.sentiment === 'BEARISH' ? 'dn' : 'nu', lvl = i % 2;
+        const dot = el('span', { class: 'ndot ' + k, style: { left: (xs(n.t) / W * 100) + '%', top: (ys(n.p) / H * 100) + '%' } });
+        const flag = el('button', { class: 'nflag ' + k + (lvl ? ' lv2' : ''), style: { left: (xs(n.t) / W * 100) + '%', '--d': (i * 110 + 500) + 'ms' }, 'aria-label': n.s.title,
+          onclick: (e) => { e.stopPropagation(); select(i); } }, el('i', { text: n.s.impact || '•' }));
+        flag.addEventListener('pointerenter', () => { tip.hidden = false; tip.textContent = hm(n.t) + ' · ' + n.s.title; tip.style.left = Math.max(0, Math.min(wrap.clientWidth - 280, xs(n.t) / W * wrap.clientWidth - 60)) + 'px'; });
+        flag.addEventListener('pointerleave', () => { tip.hidden = true; });
+        wrap.append(dot, flag); flags.push([flag, dot]);
       });
-      function showPop(m, st) {
-        clear(pop); pop.hidden = false;
-        pop.append(el('div', { class: 'cp-h' }, el('b', { class: m.chg > 0 ? 'u' : 'd', text: (m.chg > 0 ? '▲ ' : '▼ ') + Math.abs(m.chg).toFixed(2) + '%' }),
-          ' in ' + (m.w > 1 ? m.w + 'h' : '1h') + ' · ' + hm(m.t0) + '–' + hm(m.t), el('button', { class: 'ib sm', onclick: (e) => { e.stopPropagation(); pop.hidden = true; }, text: '✕' })));
-        if (st) pop.append(el('div', { class: 'fine', text: 'Likely catalyst · confirmed news published within 90 minutes of the move' }), sigRow(st), el('div', { class: 'cp-t', text: st.title }),
-          st.why ? el('div', { class: 'cp-w', text: st.why }) : null, el('button', { class: 'btn sm', onclick: (e) => { e.stopPropagation(); openStory(st.id); }, text: 'Open story →' }));
-        else pop.append(el('div', { class: 'cp-t', text: 'No confirmed news around this move.' }), el('div', { class: 'cp-w', text: 'Moves without news are usually flows, liquidations or technical levels.' }));
+      (X.moves || []).filter((m) => !m.story).forEach((m) => wrap.append(el('span', { class: 'mvl ' + (m.chg > 0 ? 'u' : 'd'), style: { left: (xs(m.t) / W * 100) + '%', top: (ys(m.p) / H * 100) + '%' }, title: 'Move without confirmed news nearby: likely flows or technicals', text: (m.chg > 0 ? '+' : '') + m.chg.toFixed(1) + '%' })));
+      const list = el('div', { class: 'lc-list' });
+      function select(i) {
+        flags.forEach(([f, d], j) => { f.classList.toggle('act', j === i); d.classList.toggle('act', j === i); });
+        [...list.children].forEach((r, j) => r.classList.toggle('act', j === N.length - 1 - i));
+        const n = N[i], st = n.s; clear(pop); pop.hidden = false;
+        pop.append(el('div', { class: 'cp-h' }, el('b', { text: hm(n.t) }), ' · ' + dshort(n.t), el('button', { class: 'ib sm', onclick: (e) => { e.stopPropagation(); pop.hidden = true; flags.forEach(([f, d]) => { f.classList.remove('act'); d.classList.remove('act'); }); }, text: '✕' })),
+          sigRow(st), el('div', { class: 'cp-t', text: st.title }), st.why ? el('div', { class: 'cp-w', text: st.why }) : null,
+          el('div', { class: 'cp-r' }, el('span', null, 'When it broke ', el('b', { text: fmtLc(sym, n.p) })), isNum(n.chg1h) ? el('span', null, '1h later ', el('b', { class: n.chg1h >= 0 ? 'u' : 'd', text: fmtLc(sym, n.p1h) + ' (' + (n.chg1h >= 0 ? '+' : '') + n.chg1h.toFixed(2) + '%)' })) : null,
+            isNum(n.move) ? el('span', null, 'Big move ', el('b', { class: n.move >= 0 ? 'u' : 'd', text: (n.move >= 0 ? '+' : '') + n.move.toFixed(1) + '%' })) : null),
+          el('button', { class: 'btn sm', onclick: (e) => { e.stopPropagation(); openStory(st.id); }, text: 'Open story →' }));
       }
-      wrap.addEventListener('pointermove', (e) => { const b = wrap.getBoundingClientRect(), x = (e.clientX - b.left) / b.width * W; const t = t0 + (x - pl) / (W - pl - pr) * (t1 - t0);
+      N.slice().reverse().forEach((n, ri) => { const i = N.length - 1 - ri, k = n.s.sentiment === 'BULLISH' ? 'u' : n.s.sentiment === 'BEARISH' ? 'd' : '';
+        list.append(el('button', { class: 'lr', onclick: () => select(i) }, el('span', { class: 'lr-t', text: hm(n.t) }), el('div', null, el('div', { class: 'lr-h' }, el('i', { class: 'sd ' + k }), n.s.title),
+          el('div', { class: 'lr-m' }, '⚡ ' + (n.s.impact || '-') + '/10', isNum(n.chg1h) ? el('span', { class: n.chg1h >= 0 ? 'u' : 'd', text: '  ·  1h after ' + (n.chg1h >= 0 ? '+' : '') + n.chg1h.toFixed(2) + '%' }) : null)))); });
+      wrap.addEventListener('pointermove', (e) => { if (e.target.closest('.nflag')) return; const b = wrap.getBoundingClientRect(), x = (e.clientX - b.left) / b.width * W; const t = t0 + (x - pl) / (W - pl - pr) * (t1 - t0);
         let best = pts[0]; pts.forEach((p) => { if (Math.abs(p[0] - t) < Math.abs(best[0] - t)) best = p; });
-        const xh = s.querySelector('.xh'); xh.setAttribute('x1', xs(best[0])); xh.setAttribute('x2', xs(best[0])); xh.setAttribute('visibility', 'visible');
-        tip.hidden = false; tip.textContent = hm(best[0]) + '  $' + best[1].toLocaleString(undefined, { maximumFractionDigits: best[1] > 100 ? 0 : 3 }); tip.style.left = Math.min(b.width - 120, Math.max(0, e.clientX - b.left - 50)) + 'px'; });
-      wrap.addEventListener('pointerleave', () => { tip.hidden = true; s.querySelector('.xh').setAttribute('visibility', 'hidden'); });
-      card.append(wrap);
-      const mv = (X.moves || []).slice().sort((a, b) => b.t - a.t);
-      card.append(el('div', { class: 'cc-moves' }, mv.length ? mv.slice(0, 4).map((m) => { const st = m.story && BYID[m.story];
-        return el('button', { class: 'cm', onclick: () => showPop(m, st) }, el('b', { class: m.chg > 0 ? 'u' : 'd', text: (m.chg > 0 ? '+' : '') + m.chg.toFixed(1) + '%' }), el('span', { text: hm(m.t) }),
-          el('em', { text: st ? st.title : 'no news · flows or technicals' })); }) : el('span', { class: 'fine', text: 'A calm day: no big moves in the last 24 hours.' })),
-        el('div', { class: 'fine cc-src', text: X.src + ' · 15-minute prices · pins mark moves of 1.5%+ in 1h or 3%+ in 4h, matched to confirmed news within 90 min' }));
-      requestAnimationFrame(() => runCounts(card));
+        const xh = g.querySelector('.xh'); xh.setAttribute('x1', xs(best[0])); xh.setAttribute('x2', xs(best[0])); xh.setAttribute('visibility', 'visible');
+        tip.hidden = false; tip.textContent = dshort(best[0]) + ' ' + hm(best[0]) + '   ' + fmtLc(sym, best[1]); tip.style.left = Math.min(b.width - 170, Math.max(0, e.clientX - b.left - 60)) + 'px'; });
+      wrap.addEventListener('pointerleave', () => { tip.hidden = true; g.querySelector('.xh').setAttribute('visibility', 'hidden'); });
+      card.append(head, el('div', { class: 'lc-body' }, el('div', { class: 'lc-main' }, wrap,
+        el('div', { class: 'fine lc-src' }, X.src + ' · flags = confirmed news, placed when it broke (number = impact) · tap one for the story and what price did next')),
+        el('aside', { class: 'lc-side' }, el('div', { class: 'eyebrow', text: 'News on this chart' }), N.length ? list : el('p', { class: 'fine', text: 'No major confirmed news for this market in this window.' }))));
+      if (live) {
+        LCREF = { sym, tick(p, old) { priceEl.textContent = fmtLc(sym, p); priceEl.classList.remove('fu', 'fd'); void priceEl.offsetWidth; if (old) priceEl.classList.add(p >= old ? 'fu' : 'fd');
+          const yy = Math.max(pt, Math.min(H - pb, ys(p))); nowDot.style.top = (yy / H * 100) + '%'; } };
+        liveSocket(); if (LIVEPX[sym]) LCREF.tick(LIVEPX[sym]);
+      }
     }
     draw(); return card;
   }
@@ -676,31 +706,18 @@
       rv(el('h1', { class: 'grad', text: DAY ? 'From the archive.' : greet() + '.' }), 1),
       rv(lede ? el('p', { class: 'lede', text: lede }) : el('p', { class: 'lede' }, `While you were away (${ago(since).replace(' ago', '')}), `, el('b', { text: nNew + ' new ' + (nNew === 1 ? 'story' : 'stories') }), ' broke', nUpd ? [' and ', el('b', { text: nUpd + ' moved forward' })] : '', nBrk ? [' — ', el('b', { class: 'red', text: nBrk + ' breaking' })] : '', '.'), 2),
       regimeBadge() ? rv(regimeBadge(), 3) : null,
-      driversBox() ? rv(driversBox(), 4) : null,
       rv(el('div', { class: 'cta' }, el('button', { class: 'btn grad-btn big', onclick: () => openBrief() }, el('span', { class: 'play' }, '▶'), 'Play the 5-minute brief'),
-        el('button', { class: 'btn ghost big', onclick: () => { const t = $('away') || $('top'); if (t) t.scrollIntoView({ behavior: 'smooth' }); } }, sinceMode() && nNew + nUpd ? 'What\'s new ↓' : 'Top stories ↓')), 5),
-      rv(el('div', { class: 'stats' }, stat(D.stories.length, 'confirmed stories', 's1'), stat(D.outlets || new Set(D.stories.flatMap((s) => s.orgs)).size, 'newsrooms', 's2'),
-        D.feeds ? stat(D.feeds.ok, 'of ' + D.feeds.total + ' sources live', 's3') : null, D.unconfirmed_hidden ? stat(D.unconfirmed_hidden, 'unconfirmed kept out', 's4') : null), 6));
-    const CC = catalystCard();
-    let G = null;
-    if (!CC) G = el('div', { class: 'globe-hero' }, el('div', { class: 'gh-cap' }, el('span', { class: 'dot' }), 'Where it\'s happening · drag to turn'));
-    M.append(el('section', { class: 'hero' + (CC ? ' trader' : '') }, L, el('div', { class: 'hero-r' }, rv(CC || G, 2))));
-    if (G) requestAnimationFrame(() => { if (FEATS.length) mountGlobe(G, D.stories); });
+        el('button', { class: 'btn ghost big', onclick: () => { const t = $('charts') || $('top'); if (t) t.scrollIntoView({ behavior: 'smooth' }); } }, 'Live charts ↓')), 5));
+    const DR = driversBox();
+    M.append(el('section', { class: 'hero trader' }, L, el('div', { class: 'hero-r' }, DR ? rv(el('div', { class: 'glass drv-card' }, DR), 2) : null)));
+    const LC = liveChart();
+    const CC = LC;
     /* breaking */
     if (!DAY) D.stories.filter((s) => s.breaking).sort((a, b) => b.n - a.n).slice(0, 2).forEach((s, i) => M.append(rv(act(el('div', { class: 'breaking glass' },
       el('span', { class: 'bl' }, el('i'), 'Breaking'), el('span', { class: 'btx', text: s.title }), el('span', { class: 'fine', text: s.n + ' newsrooms · ' + ago(s.first) })), s.id), i)));
-    /* derivatives + narratives */
+    /* live charts: price × news, then positioning */
+    if (LC) M.append(sec('Live charts', { id: 'charts', eyebrow: 'Price × news', sub: 'Bitcoin, gold and the S&P 500, with the important confirmed news pinned where it broke' }, LC));
     const dsec = derivSection(); if (dsec) M.append(dsec);
-    const nsec = narrSection(); if (nsec) M.append(nsec);
-    /* market pulse */
-    const order = ['btc', 'eth', 'spx', 'ndx', 'gold', 'oil', 'gas', 'dxy', 'eur', 'jpy', 'lkr'];
-    const ms = order.map((k) => MK[k]).filter((m) => m && isNum(m.p));
-    if (ms.length) M.append(sec('Market pulse', { cls: 'pulse', eyebrow: 'Numbers', sub: sinceMode() && snapPrev ? 'Change today · tap a chapter for more' : 'Change today', more: el('span', { class: 'fine', text: 'For the big picture, not trading' }) },
-      el('div', { class: 'mts' }, ms.map((m, i) => rv(tile(m, false, 'today'), i)), D.fng ? rv(fngGauge(D.fng), ms.length) : null)));
-    /* macro snapshot */
-    const mh = MACRO_HOME.map((k) => (D.macro || []).find((x) => x.k === k)).filter((x) => x && isNum(x.v));
-    if (mh.length) M.append(sec('Macro snapshot', { eyebrow: 'Official statistics', sub: 'Latest releases from the BLS, BEA, Federal Reserve and ECB', more: el('button', { class: 'btn ghost sm', onclick: () => go('macro'), text: 'All macro →' }) },
-      el('div', { class: 'mts' }, mh.map((x, i) => rv(macroTile(x), i))), calBox((D.calendar || []).slice(0, 8))));
     /* while you were away */
     const shown = new Set();
     if (sinceMode()) {
@@ -713,8 +730,19 @@
     if (top.length) { top.forEach((s) => shown.add(s.id));
       const sizes = { 1: ['wide'], 2: ['lg', 'lg'], 3: ['xl', 'md', 'md'], 4: ['xl', 'md', 'md', 'wide'], 5: ['xl', 'md', 'md', 'lg', 'lg'], 6: ['xl', 'md', 'md', 'sm', 'sm', 'sm'] }[top.length];
       M.append(sec(DAY ? 'Top stories of the day' : 'Top stories', { id: 'top', eyebrow: 'The day', sub: 'In order of importance' }, el('div', { class: 'bento' }, top.map((s, i) => rv(tileB(s, sizes[i]), i))))); }
+    /* market pulse */
+    const order = ['btc', 'eth', 'spx', 'ndx', 'gold', 'oil', 'gas', 'dxy', 'eur', 'jpy', 'lkr'];
+    const ms = order.map((k) => MK[k]).filter((m) => m && isNum(m.p));
+    if (ms.length) M.append(sec('Market pulse', { cls: 'pulse', eyebrow: 'Numbers', sub: sinceMode() && snapPrev ? 'Change today · tap a chapter for more' : 'Change today', more: el('span', { class: 'fine', text: 'For the big picture, not trading' }) },
+      el('div', { class: 'mts' }, ms.map((m, i) => rv(tile(m, false, 'today'), i)), D.fng ? rv(fngGauge(D.fng), ms.length) : null)));
+    /* macro snapshot */
+    const mh = MACRO_HOME.map((k) => (D.macro || []).find((x) => x.k === k)).filter((x) => x && isNum(x.v));
+    if (mh.length) M.append(sec('Macro snapshot', { eyebrow: 'Official statistics', sub: 'Latest releases from the BLS, BEA, Federal Reserve and ECB', more: el('button', { class: 'btn ghost sm', onclick: () => go('macro'), text: 'All macro →' }) },
+      el('div', { class: 'mts' }, mh.map((x, i) => rv(macroTile(x), i))), calBox((D.calendar || []).slice(0, 8))));
+    /* narratives */
+    const nsec = narrSection(); if (nsec) M.append(nsec);
     /* globe */
-    if (CC && D.stories.some((s) => (s.places || []).length)) M.append(globeSection());
+    void CC; if (D.stories.some((s) => (s.places || []).length)) M.append(globeSection());
     /* every area */
     const cards = chapterOrder().map((c, i) => {
       const Ls = storiesOf(c), pick = Ls.slice(0, 3), mk = (MKT[c] || []).map((k) => MK[k]).filter((m) => m && isNum(m.p)).slice(0, 2);
@@ -786,7 +814,7 @@
   function renderFoot() {
     const f = D.feeds || {}, list = Object.entries(f.list || {});
     clear($('foot')).append(el('div', { class: 'foot-in glass' },
-      el('div', null, el('div', { class: 'f-brand' }, el('span', { class: 'logo' }), 'The Daily Brief'),
+      el('div', null, el('div', { class: 'f-brand' }, el('span', { class: 'logo' }), 'Trading Desk Daily Brief'),
         el('p', null, el('b', { text: 'Only confirmed news. ' }), 'A story appears here only when two or more independent newsrooms report it, or when it comes straight from an official source (a government body, central bank, regulator or agency). ',
           'Single-source reports are kept out' + (D.unconfirmed_hidden ? ` (${D.unconfirmed_hidden} right now)` : '') + '. Sites that mostly republish others are never counted as a confirmation. ',
           'Crypto prices are checked against a second source (✓). Headlines and short teasers come from each outlet\'s own feed; tap through to read the full story. Pictures are drawn from data, not news photos.')),
@@ -950,7 +978,7 @@
       if (!DAY) { const y = scrollY; D = prepare(LIVE); if (!$('drawer').classList.contains('open') && !BM) { render(); scrollTo(0, y); } else renderTop(); }
       if (old.size) { const fresh = d.stories.filter((s) => !old.has(s.id) && (s.breaking || watched(s)));
         fresh.slice(0, 3).forEach((s) => { toast((s.breaking ? 'Breaking: ' : '★ ') + s.title.slice(0, 80));
-          if (alerts && 'Notification' in window && Notification.permission === 'granted') { try { const n = new Notification(s.breaking ? 'Breaking · The Daily Brief' : '★ Watch word · The Daily Brief', { body: s.title + '\n' + s.orgs.slice(0, 3).join(', '), icon: 'icon-192.png', tag: s.id }); n.onclick = () => { focus(); openStory(s.id); }; } catch (e) { /* */ } } }); }
+          if (alerts && 'Notification' in window && Notification.permission === 'granted') { try { const n = new Notification(s.breaking ? 'Breaking · Trading Desk Daily Brief' : '★ Watch word · Trading Desk Daily Brief', { body: s.title + '\n' + s.orgs.slice(0, 3).join(', '), icon: 'icon-192.png', tag: s.id }); n.onclick = () => { focus(); openStory(s.id); }; } catch (e) { /* */ } } }); }
       getJSON('data/archive/index.json').then((x) => { DAYS = x.days || []; renderTop(); }).catch(() => {});
     } catch (e) { /* offline: keep what we have */ }
   }
