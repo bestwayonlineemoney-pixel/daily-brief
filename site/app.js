@@ -1006,14 +1006,19 @@
     else poll();
   });
   setTimeout(() => { S.set('lastVisit', now()); saveSnap(); }, 30000);
-  /* on phones, fold away the price and session rows once you scroll down, so the header stays small */
-  let compact = false;
-  addEventListener('scroll', () => {
+  /* on phones, fold away the price and session rows once you are well down the page. Hysteresis (fold after 320px,
+     unfold only near the top) so folding can never bounce the page back and forth. */
+  let compact = false, ticking = false;
+  function onScroll() {
+    ticking = false;
     if (innerWidth > 720) { if (compact) { document.body.classList.remove('compact'); compact = false; } return; }
-    const want = scrollY > 260; if (want === compact) return;
-    const h0 = document.querySelector('.nav-wrap').offsetHeight; document.body.classList.toggle('compact', want); compact = want;
-    const h1 = document.querySelector('.nav-wrap').offsetHeight; if (want) scrollBy(0, h1 - h0);
-  }, { passive: true });
+    const y = scrollY;
+    if (!compact && y > 320) { compact = true; document.body.classList.add('compact'); }
+    else if (compact && y < 30) { compact = false; document.body.classList.remove('compact'); }
+  }
+  addEventListener('scroll', () => { if (!ticking) { ticking = true; requestAnimationFrame(onScroll); } }, { passive: true });
+  function measureHeader() { if (compact) return; const h = document.querySelector('.nav-wrap').offsetHeight; document.body.style.setProperty('--hdr', (h + 4) + 'px'); }
+  addEventListener('resize', measureHeader); setTimeout(measureHeader, 50); setTimeout(measureHeader, 1500);
 
   /* ================= start ================= */
   async function start() {
