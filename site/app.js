@@ -266,11 +266,13 @@
   let LIVE = null, D = null, DAYS = [], DAY = null, MK = {}, BYID = {};
   let view = 'front', query = '';
   let stars = S.get('stars', {}), watch = S.get('watch', null), alerts = S.get('alerts', false), seen = new Set(S.get('seen', []));
-  let since = S.get('lastVisit', 0), snapPrev = S.get('snap', null), hiddenAt = 0;
+  /* "since you were last here" = the start of your last real visit (a reload a few minutes later keeps the same point) */
+  let since = (() => { const last = S.get('lastVisit', 0); let anchor = S.get('anchor', 0); if (!anchor || (last && now() - last > 20 * 60)) { anchor = last; S.set('anchor', anchor); } return anchor; })();
+  let snapPrev = S.get('snap', null), hiddenAt = 0;
   let TOPO = null, FEATS = [], CENT = {}, MESH = null; const GRAT = d3.geoGraticule10();
   const CENT_FIX = { 'United States of America': [-98, 39], France: [2.3, 46.6], Russia: [40, 56], Norway: [9, 61], Canada: [-98, 57], Netherlands: [5.3, 52.2], Denmark: [9.5, 56], Chile: [-71, -34], 'New Zealand': [172, -41], Indonesia: [113, -2], Malaysia: [102, 4] };
   let WRX = null;
-  const sinceMode = () => !DAY && since > 0 && now() - since < 36 * 3600;
+  const sinceMode = () => !DAY && since > 0 && now() - since < 36 * 3600 && now() - since > 10 * 60;
   const isNew = (s) => sinceMode() && s.first > since;
   const isUpd = (s) => sinceMode() && !isNew(s) && s.n >= 2 && (s.reports || []).some((r) => r.ts > since);
   const newReports = (s) => (s.reports || []).filter((r) => r.ts > since).length;
@@ -1000,10 +1002,18 @@
   function leave() { S.set('lastVisit', now()); saveSnap(); hiddenAt = now(); }
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) leave();
-    else if (hiddenAt && now() - hiddenAt > 30 * 60) { since = S.get('lastVisit', since); snapPrev = S.get('snap', snapPrev); poll().then(() => { if (!BM) render(); }); }
+    else if (hiddenAt && now() - hiddenAt > 30 * 60) { since = S.get('lastVisit', since); S.set('anchor', since); snapPrev = S.get('snap', snapPrev); poll().then(() => { if (!BM) render(); }); }
     else poll();
   });
   setTimeout(() => { S.set('lastVisit', now()); saveSnap(); }, 30000);
+  /* on phones, fold away the price and session rows once you scroll down, so the header stays small */
+  let compact = false;
+  addEventListener('scroll', () => {
+    if (innerWidth > 720) { if (compact) { document.body.classList.remove('compact'); compact = false; } return; }
+    const want = scrollY > 260; if (want === compact) return;
+    const h0 = document.querySelector('.nav-wrap').offsetHeight; document.body.classList.toggle('compact', want); compact = want;
+    const h1 = document.querySelector('.nav-wrap').offsetHeight; if (want) scrollBy(0, h1 - h0);
+  }, { passive: true });
 
   /* ================= start ================= */
   async function start() {

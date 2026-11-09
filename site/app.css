@@ -486,3 +486,19 @@ main.swap{animation:swap .5s var(--ease)}@keyframes swap{from{opacity:.4}to{opac
 @media(max-width:720px){.lc{padding:16px 14px}.lc-chart{height:300px}.lc-p{font-size:30px}.lc-tabs{width:100%}.lc-tabs button{padding:6px 10px}.nflag i{width:20px;height:20px;font-size:10px}.nflag.lv2{top:26px}}
 
 .sec,.hero{scroll-margin-top:150px}
+
+/* phone + tablet fixes for the trader hero (must come after the desktop rules above) */
+.rg-l b{white-space:nowrap}
+@media(max-width:1120px){.hero.trader{grid-template-columns:1fr;gap:22px;align-items:start}}
+@media(max-width:720px){
+  .hero.trader{padding-top:18px}
+  .eyebrow.live{font-size:10.5px;letter-spacing:.1em;flex-wrap:wrap;row-gap:2px}
+  .regime{padding:12px 14px}.rg-l{flex-wrap:wrap;gap:8px}.rg-l b{margin-left:0;font-size:14px}
+  .rg-why span{font-size:11.5px}
+  .drv-card{padding:4px 12px 8px}.drv{grid-template-columns:28px 1fr;gap:10px;padding:10px 4px}.drv-n{font-size:22px}.drv-t{font-size:15px}.drv-w{font-size:13px}
+  .sig{gap:5px}.im-b{display:none}
+}
+
+/* sticky header: solid backing so the page never shows through the price and session rows */
+.nav-wrap{background:linear-gradient(180deg,rgba(5,6,10,.94) 0%,rgba(5,6,10,.9) 82%,rgba(5,6,10,0) 100%);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);padding-bottom:8px}
+body.compact .nav-wrap .tick,body.compact .nav-wrap .radar{display:none}
