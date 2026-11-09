@@ -643,7 +643,9 @@ def run(verbose=True):
     days = sorted((p.stem for p in ARCH.glob("20??-??-??.json")), reverse=True)
     write(ARCH / "index.json", {"days": days})
 
-    msg = f"{len(day)} stories today from {out['outlets']} outlets · {ok}/{len(feeds)} sources OK · summary: {brief['by']}"
+    mok = sum(1 for r in mac.get("rows", []) if not r.get("err"))
+    msg = (f"{len(day)} stories today from {out['outlets']} outlets · {ok}/{len(feeds)} sources OK · macro {mok}/{len(MACRO)}"
+           f"{' · calendar ' + str(len(mac['calendar'])) if mac.get('calendar') else ''} · summary: {brief['by']}")
     if verbose:
         print(time.strftime("%H:%M:%S"), msg, flush=True)
         bad = [n for n, h in health.items() if not h["ok"]]
