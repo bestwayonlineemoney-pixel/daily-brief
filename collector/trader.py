@@ -39,7 +39,7 @@ BULL = {"surge": 2, "soar": 2, "rall": 2, "record high": 2, "all-time high": 3, 
         "tops $": 1, "above $": 1, "breaks out": 2, "buy": 1, "accumulat": 2, "reserve": 1, "green light": 2, "wins": 1, "launch": 1, "partnership": 1}
 BEAR = {"plunge": 3, "crash": 3, "slump": 2, "tumble": 2, "falls": 1, "drop": 1, "slide": 1, "hack": 3, "exploit": 3, "stolen": 3, "drain": 2,
         "ban": 2, "lawsuit": 2, "sues": 2, "probe": 1, "investigat": 1, "outflow": 2, "liquidat": 2, "sell-off": 2, "selloff": 2, "rate hike": 2,
-        "hikes rate": 2, "hotter": 2, "tariff": 1, "sanction": 1, "war ": 1, "missile": 2, "strike": 1, "attack": 2, "default": 3, "bankrupt": 3,
+        "hikes rate": 2, "hotter": 2, "tariff": 1, "sanction": 1, "war ": 1, "missile": 2, "airstrike": 1, "drone strike": 1, "attack": 2, "default": 3, "bankrupt": 3,
         "fraud": 2, "arrest": 1, "delay": 1, "reject": 2, "warns": 1, "fear": 1, "recession": 2, "shutdown": 1, "halt": 1, "closure": 1, "escalat": 2, "below $": 1}
 CRITICAL = re.compile(r"\b(etfs?|hack|exploit|rate cut|rate hike|cpi|inflation data|fomc|fed decision|liquidation|sec|ban|approv\w*|default|"
                       r"bankrupt\w*|jobs report|payrolls|nonfarm|tariffs?|hormuz|invasion|nuclear|emergency)\b", re.I)
@@ -61,7 +61,8 @@ WHY = [  # (pattern, the one-line "why it matters")
     (r"payrolls|jobs report|unemployment|jobless", "Jobs data shapes the Fed's next move, so markets swing on surprises."),
     (r"hormuz|tanker|oil.*(jump|surge|soar)|opec", "Higher oil can revive inflation fears and lift the dollar, a headwind for risk assets."),
     (r"ceasefire|peace talks|talks", "Progress toward peace lowers risk premiums and usually helps risk assets."),
-    (r"missile|strike|attack|invasion|escalat|war\b", "Escalation pushes money to safety (dollar, gold) and away from risk."),
+    (r"earthquake|tsunami|hurricane|typhoon|cyclone|flood|wildfire", "Natural disasters can disrupt local economies, supply chains and insurers."),
+    (r"missile|airstrike|air strike|drone strike|military|attack|invasion|escalat|\bwar\b", "Escalation pushes money to safety (dollar, gold) and away from risk."),
     (r"tariff|trade war|sanction", "Trade barriers raise costs and uncertainty, usually weighing on risk assets."),
     (r"liquidat", "Forced liquidations add to the move and show how crowded positioning was."),
     (r"\bsec\b|lawsuit|sues|regulat|ban\b", "Regulatory action changes who can buy and hold, so it moves prices."),
@@ -436,7 +437,7 @@ def fomc_dates(now):
                 if mon and last:
                     day = int(last[-1])
                     mon2 = mon if int(last[-1]) >= int(last[0]) or "/" not in mo else MONTHS.get(mo.split("/")[-1].lower())
-                    dates.append({"date": f"{yr}-{mon2:02d}-{day:02d}", "label": f"FOMC decision ({mo} {dd.strip()})", "sep": "*" in dd})
+                    dates.append({"date": f"{yr}-{mon2:02d}-{day:02d}", "label": f"FOMC decision ({mo} {dd.strip().rstrip('*')})" + (" · with projections" if "*" in dd else ""), "sep": "*" in dd})
         dates = sorted({d["date"]: d for d in dates}.values(), key=lambda d: d["date"])
         if dates:
             NET["write"](NET["state"] / "fomc.json", {"at": int(now), "dates": dates})

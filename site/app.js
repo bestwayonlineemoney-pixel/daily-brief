@@ -364,14 +364,14 @@
     opt = opt || {};
     const a = act(el('article', { 'data-sid': s.id, class: 'item spot' + (seen.has(s.id) ? ' read' : '') }), s.id);
     if (opt.thumb !== false) { const t = el('div', { class: 'th' }); t.append(artBox(s)); a.append(t); }
-    a.append(el('div', { class: 'body' }, kicker(s, opt), el('h3', { text: s.title }), s.dek && !opt.noDek ? el('p', { class: 'dek', text: s.dek }) : null, opt.noSrc ? null : srcLine(s)));
+    a.append(el('div', { class: 'body' }, kicker(s, opt), el('h3', { text: s.title }), s.dek && !opt.noDek ? el('p', { class: 'dek', text: s.dek }) : null, opt.noSig ? null : sigRow(s), opt.noSrc ? null : srcLine(s)));
     return a;
   }
   function tileB(s, size) {
     const a = act(el('article', { 'data-sid': s.id, class: 'bt glass spot ' + (size || '') + (seen.has(s.id) ? ' read' : ''), style: { '--c': cv(s.cat) } }), s.id);
     const art = el('div', { class: 'bt-art' }); art.append(artBox(s, size === 'xl'));
     const m = marketArt(s); if (m) art.append(el('span', { class: 'mchip' }, m.name + ' ', el('b', { text: fmtP(m) }), ' ', el('i', { class: (m.chg || 0) >= 0 ? 'u' : 'd', text: fmtC(m.chg) })));
-    a.append(art, el('div', { class: 'bt-body' }, kicker(s), el('h3', { text: s.title }), s.dek && (size === 'xl' || size === 'lg') ? el('p', { class: 'dek', text: s.dek }) : null, srcLine(s)));
+    a.append(art, el('div', { class: 'bt-body' }, kicker(s), el('h3', { text: s.title }), s.dek && (size === 'xl' || size === 'lg') ? el('p', { class: 'dek', text: s.dek }) : null, sigRow(s), srcLine(s)));
     return a;
   }
   function sec(title, opt, ...kids) {
@@ -435,29 +435,220 @@
         el('div', { class: 'mts' }, l.map((x, i) => rv(macroTile(x), i))))))); });
   }
 
+
+  /* ================= trader layer: signals on stories ================= */
+  const TR = () => D.trader || {};
+  function sentPill(s) {
+    if (!s.sentiment) return null;
+    const k = s.sentiment === 'BULLISH' ? 'bull' : s.sentiment === 'BEARISH' ? 'bear' : 'neu';
+    return el('span', { class: 'sp ' + k, title: (s.ai ? 'Tone judged by AI from the headlines' : 'Tone from a financial keyword list') + ' · not advice' },
+      el('i', { text: k === 'bull' ? '▲' : k === 'bear' ? '▼' : '●' }), s.sentiment);
+  }
+  function impactMeter(s) {
+    if (!isNum(s.impact)) return null;
+    const lv = s.impact >= 8 ? 'hi' : s.impact >= 5 ? 'mid' : 'lo', bars = el('span', { class: 'im-b' });
+    for (let i = 1; i <= 10; i++) bars.append(el('i', { class: i <= s.impact ? 'on' : '' }));
+    return el('span', { class: 'im ' + lv, title: 'Impact score: who reported it, how many, how fast, and what it is about' }, '⚡ ', el('b', { text: s.impact }), '/10', bars);
+  }
+  function sigRow(s) {
+    if (!s.sentiment && !(s.assets || []).length) return null;
+    return el('div', { class: 'sig' }, sentPill(s), impactMeter(s), (s.assets || []).map((a) => el('span', { class: 'tk', text: a })));
+  }
+
+  /* ================= session radar (computed in the browser, any time zone) ================= */
+  const SESS = [
+    { name: 'Asia', city: 'Tokyo', tz: 'Asia/Tokyo', o: 9 * 60, c: 18 * 60 },
+    { name: 'London', city: 'Europe', tz: 'Europe/London', o: 8 * 60, c: 16 * 60 + 30 },
+    { name: 'New York', city: 'US equities 9:30 ET', tz: 'America/New_York', o: 9 * 60 + 30, c: 16 * 60 },
+  ];
+  function tzParts(date, tz) {
+    const p = {}; new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'short', hour: '2-digit', minute: '2-digit', hour12: false }).formatToParts(date).forEach((x) => { p[x.type] = x.value; });
+    return { wd: p.weekday, min: (parseInt(p.hour, 10) % 24) * 60 + parseInt(p.minute, 10) };
+  }
+  const isOpenAt = (s, d) => { const p = tzParts(d, s.tz); return !['Sat', 'Sun'].includes(p.wd) && p.min >= s.o && p.min < s.c; };
+  function nextFlip(s, d) { for (let m = 5; m <= 4 * 1440; m += 5) { const t = new Date(d.getTime() + m * 60000); if (isOpenAt(s, t) !== isOpenAt(s, d)) return m; } return null; }
+  const dur = (m) => m == null ? '' : m >= 1440 ? Math.floor(m / 1440) + 'd ' + Math.floor((m % 1440) / 60) + 'h' : m >= 60 ? Math.floor(m / 60) + 'h ' + (m % 60) + 'm' : m + 'm';
+  function cmeOpen(d) { const p = tzParts(d, 'America/Chicago'); if (p.wd === 'Sat') return false; if (p.wd === 'Sun') return p.min >= 17 * 60; if (p.wd === 'Fri') return p.min < 16 * 60; return !(p.min >= 16 * 60 && p.min < 17 * 60); }
+  function renderRadar() {
+    const box = $('radar'); if (!box) return; const d = new Date(); clear(box);
+    const open = SESS.map((s) => isOpenAt(s, d));
+    SESS.forEach((s, i) => {
+      const m = nextFlip(s, d), p = tzParts(d, s.tz), pct = open[i] ? Math.round((p.min - s.o) / (s.c - s.o) * 100) : 0;
+      box.append(el('div', { class: 'rs' + (open[i] ? ' on' : ''), title: s.city + ' · ' + String(Math.floor(p.min / 60)).padStart(2, '0') + ':' + String(p.min % 60).padStart(2, '0') + ' local' },
+        el('i'), el('b', { text: s.name }), el('span', { text: open[i] ? 'open · closes in ' + dur(m) : 'opens in ' + dur(m) }), open[i] ? el('u', { style: { width: pct + '%' } }) : null));
+    });
+    if (open[1] && open[2]) box.append(el('div', { class: 'rs ov on', title: 'London and New York are both open: usually the most liquid hours' }, el('i'), el('b', { text: 'Overlap' }), el('span', { text: 'London + New York' })));
+    box.append(el('div', { class: 'rs' + (cmeOpen(d) ? ' on' : ''), title: 'CME crypto futures: Sunday 5pm to Friday 4pm Chicago time, with a daily 1-hour break' }, el('i'), el('b', { text: 'CME' }), el('span', { text: cmeOpen(d) ? 'crypto futures open' : 'closed' })));
+    box.append(el('div', { class: 'rs me' }, el('b', { text: d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }), el('span', { text: 'your time' })));
+  }
+  setInterval(renderRadar, 30000);
+
+  /* ================= high-impact events banner ================= */
+  function eventsBar() {
+    const E = TR().events; if (!E) return null;
+    const up = (E.upcoming || []).filter((e) => e.days <= 21).slice(0, 4), rel = (E.released || []).map((id) => BYID[id]).filter(Boolean).slice(0, 2);
+    if (!up.length && !rel.length) return null;
+    return rv(el('div', { class: 'evbar glass' }, el('span', { class: 'ev-l' }, el('i', { text: '⚡' }), 'High-impact'),
+      rel.map((s) => act(el('span', { class: 'ev out' }, el('b', { text: 'Out today' }), s.title.length > 70 ? s.title.slice(0, 68) + '…' : s.title), s.id)),
+      up.map((e) => el('span', { class: 'ev', title: 'Source: ' + e.src }, el('b', { text: e.kind }), new Date(e.date + 'T12:00:00').toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' }),
+        el('em', { text: e.days === 0 ? 'today' : e.days === 1 ? 'tomorrow' : 'in ' + e.days + ' days' })))), 0);
+  }
+
+  /* ================= "why is it moving?" chart ================= */
+  let CAT_SYM = 'BTC';
+  function catalystCard() {
+    const C = TR().catalysts || {}; const syms = ['BTC', 'ETH', 'SOL'].filter((k) => C[k] && (C[k].pts || []).length > 10);
+    if (!syms.length) return null;
+    if (!syms.includes(CAT_SYM)) CAT_SYM = syms[0];
+    const card = el('div', { class: 'cc glass' });
+    function draw() {
+      clear(card); const X = C[CAT_SYM], pts = X.pts, up = X.chg24 >= 0;
+      const tabs = el('div', { class: 'cc-tabs' }, syms.map((k) => el('button', { class: k === CAT_SYM ? 'on' : '', onclick: (e) => { e.stopPropagation(); CAT_SYM = k; draw(); } }, k,
+        el('i', { class: C[k].chg24 >= 0 ? 'u' : 'd', text: (C[k].chg24 >= 0 ? '+' : '') + C[k].chg24.toFixed(2) + '%' }))));
+      const last = pts[pts.length - 1][1];
+      card.append(el('div', { class: 'cc-h' }, el('div', null, el('div', { class: 'eyebrow', text: 'Why is it moving?' }), el('div', { class: 'cc-p' }, cnt(last, (v) => '$' + v.toLocaleString(undefined, { maximumFractionDigits: v > 100 ? 0 : 2 }), 'cc_' + CAT_SYM),
+        el('span', { class: 'chg ' + (up ? 'u' : 'd'), text: (up ? '▲ ' : '▼ ') + Math.abs(X.chg24).toFixed(2) + '% · 24h' }))), tabs));
+      const W = 640, H = 260, pl = 6, pr = 54, pt = 18, pb = 26, t0 = pts[0][0], t1 = pts[pts.length - 1][0];
+      const lo = Math.min(...pts.map((p) => p[1])), hi = Math.max(...pts.map((p) => p[1])), pad = (hi - lo) * 0.12 || hi * 0.002;
+      const xs = (t) => pl + (t - t0) / (t1 - t0 || 1) * (W - pl - pr), ys = (v) => pt + (1 - (v - (lo - pad)) / ((hi + pad) - (lo - pad))) * (H - pt - pb);
+      const line = pts.map((p, i) => (i ? 'L' : 'M') + xs(p[0]).toFixed(1) + ' ' + ys(p[1]).toFixed(1)).join(' ');
+      const c1 = up ? '#34D399' : '#F87171';
+      let grid = ''; for (let i = 0; i <= 4; i++) { const v = lo - pad + ((hi + pad) - (lo - pad)) * i / 4, y = ys(v); grid += `<line x1="${pl}" x2="${W - pr}" y1="${y}" y2="${y}" stroke="#fff" stroke-opacity=".05"/><text x="${W - pr + 8}" y="${y + 4}" font-size="10.5" fill="#6B7080" font-family="JetBrains Mono,monospace">${v >= 1000 ? Math.round(v).toLocaleString() : v.toFixed(v > 10 ? 1 : 3)}</text>`; }
+      for (let h = 0; h <= 24; h += 6) { const t = t1 - (24 - h) * 3600; if (t < t0) continue; grid += `<text x="${xs(t)}" y="${H - 6}" font-size="10.5" fill="#6B7080" text-anchor="middle" font-family="JetBrains Mono,monospace">${h === 24 ? 'now' : hm(t)}</text>`; }
+      const s = svg(`0 0 ${W} ${H}`, `<defs><linearGradient id="ccg${++gid}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${c1}" stop-opacity=".28"/><stop offset="1" stop-color="${c1}" stop-opacity="0"/></linearGradient>
+        <filter id="glow${gid}" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
+        ${grid}<path d="${line} L${xs(t1)} ${H - pb} L${xs(t0)} ${H - pb} Z" fill="url(#ccg${gid})"/><path class="draw" d="${line}" fill="none" stroke="${c1}" stroke-width="2" stroke-linejoin="round" pathLength="1" filter="url(#glow${gid})"/>
+        <line class="xh" x1="0" x2="0" y1="${pt}" y2="${H - pb}" stroke="#fff" stroke-opacity=".25" stroke-dasharray="3 4" visibility="hidden"/>`);
+      s.setAttribute('preserveAspectRatio', 'none'); s.classList.add('cc-svg');
+      const wrap = el('div', { class: 'cc-chart' }, s), tip = el('div', { class: 'cc-tip', hidden: true }), pop = el('div', { class: 'cc-pop', hidden: true });
+      wrap.append(tip, pop);
+      (X.moves || []).forEach((m, i) => {
+        const st = m.story && BYID[m.story], upm = m.chg > 0;
+        const pin = el('button', { class: 'pin ' + (upm ? 'up' : 'dn') + (st ? '' : ' none') + (m.minor ? ' minor' : ''), style: { left: (xs(m.t) / W * 100) + '%', top: (ys(m.p) / H * 100) + '%', '--d': (i * 120 + 600) + 'ms' },
+          'aria-label': 'Move ' + fmtC(m.chg) + ' at ' + hm(m.t), onclick: (e) => { e.stopPropagation(); showPop(m, st); } }, el('i'), el('span', { text: (upm ? '+' : '') + m.chg.toFixed(1) + '%' }));
+        wrap.append(pin);
+      });
+      function showPop(m, st) {
+        clear(pop); pop.hidden = false;
+        pop.append(el('div', { class: 'cp-h' }, el('b', { class: m.chg > 0 ? 'u' : 'd', text: (m.chg > 0 ? '▲ ' : '▼ ') + Math.abs(m.chg).toFixed(2) + '%' }),
+          ' in ' + (m.w > 1 ? m.w + 'h' : '1h') + ' · ' + hm(m.t0) + '–' + hm(m.t), el('button', { class: 'ib sm', onclick: (e) => { e.stopPropagation(); pop.hidden = true; }, text: '✕' })));
+        if (st) pop.append(el('div', { class: 'fine', text: 'Likely catalyst · confirmed news published within 90 minutes of the move' }), sigRow(st), el('div', { class: 'cp-t', text: st.title }),
+          st.why ? el('div', { class: 'cp-w', text: st.why }) : null, el('button', { class: 'btn sm', onclick: (e) => { e.stopPropagation(); openStory(st.id); }, text: 'Open story →' }));
+        else pop.append(el('div', { class: 'cp-t', text: 'No confirmed news around this move.' }), el('div', { class: 'cp-w', text: 'Moves without news are usually flows, liquidations or technical levels.' }));
+      }
+      wrap.addEventListener('pointermove', (e) => { const b = wrap.getBoundingClientRect(), x = (e.clientX - b.left) / b.width * W; const t = t0 + (x - pl) / (W - pl - pr) * (t1 - t0);
+        let best = pts[0]; pts.forEach((p) => { if (Math.abs(p[0] - t) < Math.abs(best[0] - t)) best = p; });
+        const xh = s.querySelector('.xh'); xh.setAttribute('x1', xs(best[0])); xh.setAttribute('x2', xs(best[0])); xh.setAttribute('visibility', 'visible');
+        tip.hidden = false; tip.textContent = hm(best[0]) + '  $' + best[1].toLocaleString(undefined, { maximumFractionDigits: best[1] > 100 ? 0 : 3 }); tip.style.left = Math.min(b.width - 120, Math.max(0, e.clientX - b.left - 50)) + 'px'; });
+      wrap.addEventListener('pointerleave', () => { tip.hidden = true; s.querySelector('.xh').setAttribute('visibility', 'hidden'); });
+      card.append(wrap);
+      const mv = (X.moves || []).slice().sort((a, b) => b.t - a.t);
+      card.append(el('div', { class: 'cc-moves' }, mv.length ? mv.slice(0, 4).map((m) => { const st = m.story && BYID[m.story];
+        return el('button', { class: 'cm', onclick: () => showPop(m, st) }, el('b', { class: m.chg > 0 ? 'u' : 'd', text: (m.chg > 0 ? '+' : '') + m.chg.toFixed(1) + '%' }), el('span', { text: hm(m.t) }),
+          el('em', { text: st ? st.title : 'no news · flows or technicals' })); }) : el('span', { class: 'fine', text: 'A calm day: no big moves in the last 24 hours.' })),
+        el('div', { class: 'fine cc-src', text: X.src + ' · 15-minute prices · pins mark moves of 1.5%+ in 1h or 3%+ in 4h, matched to confirmed news within 90 min' }));
+      requestAnimationFrame(() => runCounts(card));
+    }
+    draw(); return card;
+  }
+
+  /* ================= regime + key drivers ================= */
+  function regimeBadge() {
+    const R = TR().regime; if (!R) return null;
+    const k = R.label === 'RISK-ON' ? 'on' : R.label === 'RISK-OFF' ? 'off' : 'chop';
+    return el('div', { class: 'regime ' + k }, el('div', { class: 'rg-l' }, el('span', { class: 'rg-dot' }), el('span', { class: 'rg-k', text: 'Market regime' }), el('b', { text: R.label })),
+      el('div', { class: 'rg-why' }, (R.why || []).map(([s, t]) => el('span', { class: s === '+' ? 'u' : 'd', text: (s === '+' ? '+ ' : '− ') + t }))));
+  }
+  function driversBox() {
+    const ids = (TR().drivers || []).map((id) => BYID[id]).filter(Boolean); if (!ids.length) return null;
+    return el('div', { class: 'drivers' }, el('div', { class: 'eyebrow', text: 'The 3 key drivers · last 8 hours' }),
+      ids.map((s, i) => act(el('div', { class: 'drv spot', style: { '--c': cv(s.cat) } }, el('span', { class: 'drv-n', text: i + 1 }),
+        el('div', null, sigRow(s), el('div', { class: 'drv-t', text: s.title }), s.why ? el('div', { class: 'drv-w', text: s.why }) : null)), s.id)));
+  }
+
+  /* ================= derivatives & orderflow pulse ================= */
+  function derivCard(sym, d) {
+    const sigk = /squeeze risk|pressing/i.test(d.signal || '') ? 'bear' : /short squeeze|healthy/i.test(d.signal || '') ? 'bull' : /leverage/i.test(d.signal || '') ? 'warn' : 'neu';
+    const f = d.funding, fk = !isNum(f) ? '' : f >= 0.05 ? 'hot' : f >= 0.02 ? 'warm' : f <= -0.01 ? 'cold' : 'calm';
+    const fpos = isNum(f) ? Math.max(0, Math.min(100, 50 + f / 0.1 * 50)) : 50;
+    const ls = d.ls, lp = isNum(ls) ? ls / (1 + ls) * 100 : null;
+    const oiu = d.oi_usd, oiTxt = isNum(oiu) ? '$' + (oiu >= 1e9 ? (oiu / 1e9).toFixed(2) + 'B' : (oiu / 1e6).toFixed(0) + 'M') : isNum(d.oi_coin) ? Math.round(d.oi_coin).toLocaleString() + ' ' + sym : '—';
+    const nx = d.next ? Math.max(0, Math.round((d.next - now()) / 60)) : null;
+    return el('div', { class: 'dc glass spot' },
+      el('div', { class: 'dc-h' }, el('b', { text: sym }), el('span', { class: 'dsig ' + sigk, text: d.signal || '—' })),
+      el('div', { class: 'dc-why', text: d.why || '' }),
+      el('div', { class: 'dc-row' }, el('span', { class: 'dk', text: 'Funding (8h)' }), el('span', { class: 'fh ' + fk, text: isNum(f) ? (f >= 0 ? '+' : '') + f.toFixed(4) + '%' : '—' })),
+      el('div', { class: 'fbar' }, el('i', { style: { left: fpos + '%' } }), el('span', { text: 'shorts pay' }), el('span', { text: 'longs pay' })),
+      lp !== null ? [el('div', { class: 'dc-row' }, el('span', { class: 'dk', text: 'Long / short accounts' }), el('span', { class: 'mono', text: ls.toFixed(2) })),
+        el('div', { class: 'lsbar' }, el('i', { class: 'l', style: { width: lp + '%' } }, Math.round(lp) + '% long'), el('i', { class: 's', style: { width: (100 - lp) + '%' } }, Math.round(100 - lp) + '% short'))] : null,
+      el('div', { class: 'dc-row' }, el('span', { class: 'dk', text: 'Open interest' }), el('span', { class: 'mono' }, oiTxt, isNum(d.oi_chg) ? el('em', { class: d.oi_chg >= 0 ? 'u' : 'd', text: ' ' + (d.oi_chg >= 0 ? '+' : '') + d.oi_chg.toFixed(1) + '% 24h' }) : null)),
+      el('div', { class: 'fine dc-src', text: d.src + (d.ls_src && d.ls_src.split(' ')[0] !== d.src ? ' · ratio ' + d.ls_src : '') + (d.note ? ' · ' + d.note : '') + (nx !== null ? ' · next funding in ' + dur(nx) : '') }));
+  }
+  function derivSection() {
+    const X = TR().derivatives; if (!X) return null; const L = ['BTC', 'ETH', 'SOL'].filter((k) => X[k] && !X[k].err); if (!L.length) return null;
+    return sec('Derivatives & orderflow', { eyebrow: 'Positioning', sub: 'Who is leveraged, and which way. A crowded side is where squeezes come from' }, el('div', { class: 'dcs' }, L.map((k, i) => rv(derivCard(k, X[k]), i))));
+  }
+
+  /* ================= narrative velocity heatmap ================= */
+  function narrSection() {
+    const N = TR().narratives; if (!N || !N.length) return null;
+    const tiles = N.map((n, i) => rv(el('button', { class: 'nt glass spot', style: { '--h': (n.pct / 100).toFixed(2) }, onclick: () => openNarr(n) },
+      el('div', { class: 'nt-h' }, el('b', { text: n.name }), i === 0 ? el('span', { class: 'hot', text: 'HOTTEST' }) : null),
+      el('div', { class: 'nt-v' }, el('span', { class: 'nt-big', text: n.recent }), el('span', { text: ' reports in 6h' })),
+      el('div', { class: 'nt-f' }, el('span', { class: n.vel >= 0 ? 'u' : 'd', text: (n.vel >= 0 ? '▲ accelerating' : '▼ cooling') }), el('span', { text: '·' }), el('span', { text: n.stories + (n.stories === 1 ? ' story' : ' stories') }), el('span', { text: '·' }),
+        el('span', { class: n.tone > 0 ? 'u' : n.tone < 0 ? 'd' : '', text: n.tone > 0 ? 'bullish tone' : n.tone < 0 ? 'bearish tone' : 'mixed' })),
+      el('div', { class: 'nt-bar' }, el('i', { style: { width: n.pct + '%' } }))), i));
+    return sec('Narrative heatmap', { eyebrow: 'Momentum', sub: 'Which story is the market talking about most right now' }, el('div', { class: 'nts' }, tiles));
+  }
+  function openNarr(n) {
+    const L = n.ids.map((id) => BYID[id]).filter(Boolean);
+    openDrawer((p) => p.append(el('button', { class: 'ib dr-x', onclick: closeDrawer, 'aria-label': 'Close', text: '✕' }), el('div', { class: 'dr-body', style: { marginTop: '64px' } },
+      el('div', { class: 'eyebrow', text: 'Narrative' }), el('h2', { text: n.name }), el('p', { class: 'dek big', text: `${n.recent} reports in the last 6 hours across ${n.stories} confirmed stories.` }),
+      el('div', { class: 'list glass' }, L.map((s) => item(s, { noDek: true }))))));
+  }
+
+  /* ================= globe section ================= */
+  function globeSection() {
+    const G = el('div', { class: 'globe-hero' }, el('div', { class: 'gh-cap' }, el('span', { class: 'dot' }), 'Drag to turn · tap a dot'));
+    const P = placeIndex(D.stories).slice(0, 8), mx = P.length ? P[0].n : 1;
+    const list = el('div', { class: 'gl-list' }, P.map((p, i) => el('button', { class: 'gl-row', style: { '--c': cv(p.cat) }, onclick: () => { if (GLOBE) GLOBE.spinTo(p.ll); openPlace(p.label); } },
+      el('span', { class: 'rk', text: i + 1 }), el('span', { text: p.label }), el('em', { text: p.n + (p.n > 1 ? ' stories' : ' story') }), el('u', null, el('i', { style: { width: (p.n / mx * 100) + '%' } })))));
+    requestAnimationFrame(() => { if (FEATS.length) mountGlobe(G, D.stories); });
+    return sec('Where it\'s happening', { eyebrow: 'World map', sub: 'Places named in today\'s confirmed stories' }, el('div', { class: 'gl-wrap' }, rv(G, 0), rv(list, 1)));
+  }
+
   /* ================= the overview page ================= */
   function greet() { const h = new Date().getHours(); return h < 5 ? 'Good night' : h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'; }
   function viewHome(M) {
     if (!D.stories.length) { M.append(el('section', { class: 'hero' }, el('div', { class: 'hero-l' }, el('h1', { class: 'grad', text: LIVE ? 'No confirmed stories yet.' : 'Collecting the first news…' }),
       el('p', { class: 'lede', text: 'This page fills itself in a minute.' })), el('div', { class: 'globe-hero skel' }))); return; }
     const nNew = D.stories.filter(isNew).length, nUpd = D.stories.filter(isUpd).length, nBrk = DAY ? 0 : D.stories.filter((s) => s.breaking).length;
-    /* hero */
+    /* high-impact events */
+    const ev = eventsBar(); if (ev) M.append(ev);
+    /* hero: the morning trader's brief */
     const lede = DAY ? 'The confirmed stories of ' + new Date(DAY + 'T12:00:00').toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' }) + '.'
-      : sinceMode() ? null : `Here is the day so far: ${D.stories.length} stories, each confirmed by two or more independent newsrooms or an official source.`;
+      : sinceMode() ? null : `${D.stories.length} confirmed stories today, each reported by two or more independent newsrooms or an official source.`;
     const L = el('div', { class: 'hero-l' },
-      rv(el('div', { class: 'eyebrow live' }, DAY ? el('span', { class: 'dot off' }) : el('span', { class: 'dot' }), DAY ? 'Archive' : 'Live', ' · ', new Date(DAY ? DAY + 'T12:00:00' : Date.now()).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' }), D.updated ? ' · updated ' + ago(D.updated) : ''), 0),
+      rv(el('div', { class: 'eyebrow live' }, DAY ? el('span', { class: 'dot off' }) : el('span', { class: 'dot' }), DAY ? 'Archive' : 'Morning brief · live', ' · ', new Date(DAY ? DAY + 'T12:00:00' : Date.now()).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' }), D.updated ? ' · updated ' + ago(D.updated) : ''), 0),
       rv(el('h1', { class: 'grad', text: DAY ? 'From the archive.' : greet() + '.' }), 1),
-      rv(lede ? el('p', { class: 'lede', text: lede }) : el('p', { class: 'lede' }, `Since you were last here ${ago(since).replace(' ago', '')} ago, `, el('b', { text: nNew + ' new ' + (nNew === 1 ? 'story' : 'stories') }), ' broke', nUpd ? [' and ', el('b', { text: nUpd + ' moved forward' })] : '', nBrk ? [' — ', el('b', { class: 'red', text: nBrk + ' breaking' })] : '', '.'), 2),
+      rv(lede ? el('p', { class: 'lede', text: lede }) : el('p', { class: 'lede' }, `While you were away (${ago(since).replace(' ago', '')}), `, el('b', { text: nNew + ' new ' + (nNew === 1 ? 'story' : 'stories') }), ' broke', nUpd ? [' and ', el('b', { text: nUpd + ' moved forward' })] : '', nBrk ? [' — ', el('b', { class: 'red', text: nBrk + ' breaking' })] : '', '.'), 2),
+      regimeBadge() ? rv(regimeBadge(), 3) : null,
+      driversBox() ? rv(driversBox(), 4) : null,
       rv(el('div', { class: 'cta' }, el('button', { class: 'btn grad-btn big', onclick: () => openBrief() }, el('span', { class: 'play' }, '▶'), 'Play the 5-minute brief'),
-        el('button', { class: 'btn ghost big', onclick: () => { const t = $('away') || $('top'); if (t) t.scrollIntoView({ behavior: 'smooth' }); } }, sinceMode() && nNew + nUpd ? 'What\'s new ↓' : 'Top stories ↓')), 3),
+        el('button', { class: 'btn ghost big', onclick: () => { const t = $('away') || $('top'); if (t) t.scrollIntoView({ behavior: 'smooth' }); } }, sinceMode() && nNew + nUpd ? 'What\'s new ↓' : 'Top stories ↓')), 5),
       rv(el('div', { class: 'stats' }, stat(D.stories.length, 'confirmed stories', 's1'), stat(D.outlets || new Set(D.stories.flatMap((s) => s.orgs)).size, 'newsrooms', 's2'),
-        D.feeds ? stat(D.feeds.ok, 'of ' + D.feeds.total + ' sources live', 's3') : null, D.unconfirmed_hidden ? stat(D.unconfirmed_hidden, 'unconfirmed kept out', 's4') : null), 4));
-    const G = el('div', { class: 'globe-hero' }, el('div', { class: 'gh-cap' }, el('span', { class: 'dot' }), 'Where it\'s happening · drag to turn'));
-    M.append(el('section', { class: 'hero' }, L, rv(G, 2)));
-    requestAnimationFrame(() => { if (FEATS.length) mountGlobe(G, D.stories); });
+        D.feeds ? stat(D.feeds.ok, 'of ' + D.feeds.total + ' sources live', 's3') : null, D.unconfirmed_hidden ? stat(D.unconfirmed_hidden, 'unconfirmed kept out', 's4') : null), 6));
+    const CC = catalystCard();
+    let G = null;
+    if (!CC) G = el('div', { class: 'globe-hero' }, el('div', { class: 'gh-cap' }, el('span', { class: 'dot' }), 'Where it\'s happening · drag to turn'));
+    M.append(el('section', { class: 'hero' + (CC ? ' trader' : '') }, L, el('div', { class: 'hero-r' }, rv(CC || G, 2))));
+    if (G) requestAnimationFrame(() => { if (FEATS.length) mountGlobe(G, D.stories); });
     /* breaking */
     if (!DAY) D.stories.filter((s) => s.breaking).sort((a, b) => b.n - a.n).slice(0, 2).forEach((s, i) => M.append(rv(act(el('div', { class: 'breaking glass' },
       el('span', { class: 'bl' }, el('i'), 'Breaking'), el('span', { class: 'btx', text: s.title }), el('span', { class: 'fine', text: s.n + ' newsrooms · ' + ago(s.first) })), s.id), i)));
+    /* derivatives + narratives */
+    const dsec = derivSection(); if (dsec) M.append(dsec);
+    const nsec = narrSection(); if (nsec) M.append(nsec);
     /* market pulse */
     const order = ['btc', 'eth', 'spx', 'ndx', 'gold', 'oil', 'gas', 'dxy', 'eur', 'jpy', 'lkr'];
     const ms = order.map((k) => MK[k]).filter((m) => m && isNum(m.p));
@@ -479,6 +670,8 @@
     if (top.length) { top.forEach((s) => shown.add(s.id));
       const sizes = { 1: ['wide'], 2: ['lg', 'lg'], 3: ['xl', 'md', 'md'], 4: ['xl', 'md', 'md', 'wide'], 5: ['xl', 'md', 'md', 'lg', 'lg'], 6: ['xl', 'md', 'md', 'sm', 'sm', 'sm'] }[top.length];
       M.append(sec(DAY ? 'Top stories of the day' : 'Top stories', { id: 'top', eyebrow: 'The day', sub: 'In order of importance' }, el('div', { class: 'bento' }, top.map((s, i) => rv(tileB(s, sizes[i]), i))))); }
+    /* globe */
+    if (CC && D.stories.some((s) => (s.places || []).length)) M.append(globeSection());
     /* every area */
     const cards = chapterOrder().map((c, i) => {
       const Ls = storiesOf(c), pick = Ls.slice(0, 3), mk = (MKT[c] || []).map((k) => MK[k]).filter((m) => m && isNum(m.p)).slice(0, 2);
@@ -539,6 +732,7 @@
     const on = nav.querySelector('.on'); if (on) requestAnimationFrame(() => { const l = on.offsetLeft - nav.clientWidth / 2 + on.clientWidth / 2; nav.scrollTo({ left: l, behavior: still ? 'auto' : 'smooth' }); });
   }
   function renderTop() {
+    renderRadar();
     const items = ['btc', 'eth', 'spx', 'gold', 'oil', 'gas', 'dxy', 'eur', 'jpy', 'lkr', 'tnx', 'vix', 'silver', 'copper', 'sol'].map((k) => MK[k]).filter((m) => m && isNum(m.p))
       .map((m) => el('span', null, m.name, el('em', { text: fmtP(m) }), el('b', { class: (m.chg || 0) >= 0 ? 'u' : 'd', text: fmtC(m.chg) })));
     if (!items.length) items.push(el('span', null, 'Prices appear after the first update'));
@@ -588,7 +782,8 @@
         : `Confirmed by ${s.n} independent newsrooms: ${ind.join(', ')}.` + (s.orgs.length > ind.length ? ` Also carried by ${s.orgs.filter((o) => !ind.includes(o)).join(', ')}, which mostly republish others and are not counted.` : '');
       const rel = D.stories.filter((x) => x.id !== s.id && quality(x) && ((x.places || []).some((pp) => (s.places || []).some((q) => q.c === pp.c)) || (x.kw || []).some((k) => (s.kw || []).includes(k)))).sort((a, b) => imp(b) - imp(a)).slice(0, 4);
       const m = marketArt(s);
-      p.append(el('div', { class: 'dr-body' }, kicker(s), el('h2', { text: s.title }), s.dek ? el('p', { class: 'dek big', text: s.dek }) : null,
+      p.append(el('div', { class: 'dr-body' }, kicker(s), el('h2', { text: s.title }), s.dek ? el('p', { class: 'dek big', text: s.dek }) : null, sigRow(s),
+        s.why ? el('div', { class: 'whybox' }, el('b', { text: 'Why it matters' }), s.why, el('span', { class: 'fine', text: s.ai ? ' · AI reading of the headlines, not advice' : ' · rule-based reading, not advice' })) : null,
         el('div', { class: 'fine', text: (s.dek ? 'Teaser from ' + (s.reports.find((r) => r.u === s.link) || {}).o + '. ' : '') + 'First reported ' + dshort(s.first) + ', ' + hm(s.first) + ' · latest ' + hm(s.last) }),
         m ? el('div', { class: 'mts one', style: { marginTop: '16px' } }, tile(m, true, 'today')) : null,
         el('div', { class: 'dr-act' }, el('a', { class: 'btn pri', href: s.link, target: '_blank', rel: 'noopener noreferrer' }, 'Read the full story ↗'), saveBtn(s),
@@ -652,7 +847,7 @@
     const card = el('div', { class: 'slide ' + x.t + (dir ? (dir > 0 ? ' in-r' : ' in-l') : '') });
     if (x.t === 'intro') {
       const mv = (D.markets || []).filter((m) => isNum(m.p) && isNum(m.chg)).sort((p, q) => Math.abs(q.chg) - Math.abs(p.chg)).slice(0, 4);
-      card.append(el('div', { class: 'sl-in' }, el('div', { class: 'big-hi', text: greet() + '.' }),
+      card.append(el('div', { class: 'sl-in' }, el('div', { class: 'big-hi', text: greet() + '.' }), regimeBadge(),
         el('p', { class: 'lede', text: `Here is ${DAY ? 'that day' : 'the world right now'} in ${stories.length} stories across ${sl.filter((y) => y.t === 'chapter').length} areas. About ${Math.max(2, Math.round(stories.length * 0.25))} minutes.` }),
         sinceMode() ? el('p', { class: 'fine', text: 'Last visit: ' + ago(since) }) : null,
         mv.length ? el('div', { class: 'mts' }, mv.map((m) => tile(m, false, 'today'))) : null,
@@ -668,7 +863,8 @@
       const s = x.s; markSeen(s.id);
       const art = el('div', { class: 'sl-art' }, artFor(s, true)); const m = marketArt(s);
       if (m) art.append(el('span', { class: 'mchip' }, m.name + ' ', el('b', { text: fmtP(m) }), ' ', el('i', { class: (m.chg || 0) >= 0 ? 'u' : 'd', text: fmtC(m.chg) })));
-      card.append(art, el('div', { class: 'sl-in' }, kicker(s), el('h2', { text: s.title }), s.dek ? el('p', { class: 'dek', text: s.dek }) : null, srcLine(s),
+      card.append(art, el('div', { class: 'sl-in' }, kicker(s), el('h2', { text: s.title }), sigRow(s), s.dek ? el('p', { class: 'dek', text: s.dek }) : null,
+        s.why ? el('div', { class: 'whybox' }, el('b', { text: 'Why it matters' }), s.why) : null, srcLine(s),
         el('div', { class: 'dr-act' }, el('a', { class: 'btn pri', href: s.link, target: '_blank', rel: 'noopener noreferrer', onclick: (e) => e.stopPropagation() }, 'Read full story ↗'), saveBtn(s),
           el('button', { class: 'btn', onclick: (e) => { e.stopPropagation(); openStory(s.id); }, text: 'All reports' }))));
     } else {
