@@ -5,6 +5,7 @@
   "port": 8900,
   "summary_language": "English",
   "verified_only": true,
+  "spotlight_feeds": ["CryptoSlate"],
   "home_title": "Sri Lanka & Gulf",
   "home_countries": [
     "Sri Lanka",

@@ -909,6 +909,52 @@
     if (LOG) draw(); else { box.append(el('div', { class: 'empty glass', text: 'Loading…' })); loadLog().then(() => { if (view === 'log') draw(); }); }
   }
 
+  /* ================= headlines in pictures + spotlight sources (photos come from each outlet's own feed) ================= */
+  function photo(src, fallback, alt) {
+    const box = el('div', { class: 'ph' });
+    const img = el('img', { src, alt: alt || '', loading: 'lazy', decoding: 'async', referrerpolicy: 'no-referrer' });
+    img.onerror = () => { clear(box); if (fallback) box.append(fallback()); box.classList.add('nophoto'); };
+    img.onload = () => box.classList.add('ok');
+    box.append(img); return box;
+  }
+  function strip(cards) {
+    const row = el('div', { class: 'hls' }, cards);
+    const nav = (d) => el('button', { class: 'ib hl-nav', 'aria-label': d < 0 ? 'Back' : 'More', text: d < 0 ? '‹' : '›', onclick: () => row.scrollBy({ left: d * row.clientWidth * 0.85, behavior: still ? 'auto' : 'smooth' }) });
+    return [row, el('div', { class: 'hl-navs' }, nav(-1), nav(1))];
+  }
+  function hlCard(s, i) {
+    const a = act(el('article', { class: 'hl glass spot' + (i === 0 ? ' first' : ''), style: { '--c': cv(s.cat) } }), s.id);
+    const ph = photo(s.img, () => artBox(s), s.title);
+    ph.append(el('span', { class: 'hl-cat' }, el('i'), SHORT[s.cat] || s.cat), isNum(s.impact) ? el('span', { class: 'hl-imp ' + (s.impact >= 8 ? 'hi' : s.impact >= 5 ? 'mid' : ''), text: '⚡ ' + s.impact }) : null,
+      s.breaking && !DAY ? el('span', { class: 'hl-brk', text: 'Breaking' }) : null);
+    a.append(ph, el('div', { class: 'hl-b' }, el('h3', { text: s.title }), sigRow(s),
+      el('div', { class: 'hl-m' }, s.status === 'OFFICIAL' ? el('span', { class: 'ok', text: '◆ Official source' }) : el('span', { class: 'ok', text: '✓ ' + s.n + ' newsrooms' }), el('span', { text: ago(s.last) })),
+      el('div', { class: 'hl-cr', text: 'Photo: ' + (s.img_o || (s.orgs || [])[0] || '') })));
+    return a;
+  }
+  function headlinesSection() {
+    const L = D.stories.filter((s) => s.img && quality(s)).sort((a, b) => ((b.impact || 0) - (a.impact || 0)) || (imp(b) - imp(a))).slice(0, 12);
+    if (L.length < 3) return null;
+    const [row, navs] = strip(L.map(hlCard));
+    return sec('Headlines', { id: 'headlines', cls: 'hlsec', eyebrow: 'In pictures', sub: 'The most important confirmed stories right now. Swipe for more', more: navs }, row);
+  }
+  function spotCard(x, src) {
+    const st = x.sid && BYID[x.sid];
+    const none = () => el('div', { class: 'ph-none' }, el('span', { text: src }));
+    const inner = [x.img ? photo(x.img, none, x.t) : el('div', { class: 'ph nophoto' }, none()), el('div', { class: 'hl-b' }, el('h3', { text: x.t }), x.d ? el('p', { class: 'hl-d', text: x.d }) : null,
+      el('div', { class: 'hl-m' }, st ? el('span', { class: 'ok', text: '✓ Confirmed · ' + st.n + ' newsrooms' }) : el('span', { class: 'single', text: 'Single source' }), el('span', { text: ago(x.ts) })))];
+    return st ? act(el('article', { class: 'hl hlsrc glass spot', style: { '--c': '#BEF264' } }, inner), st.id)
+      : el('a', { class: 'hl hlsrc glass spot', href: x.u, target: '_blank', rel: 'noopener noreferrer', style: { '--c': '#BEF264' } }, inner);
+  }
+  function spotlightSections() {
+    return Object.entries(D.spotlight || {}).filter(([, L]) => (L || []).length).map(([name, L]) => {
+      const [row, navs] = strip(L.map((x) => spotCard(x, name)));
+      let host = ''; try { host = new URL(L[0].u).hostname.replace(/^www\./, ''); } catch (e) { /* */ }
+      return sec(name, { id: 'spot-' + name.replace(/\W+/g, ''), cls: 'hlsec', eyebrow: 'Crypto · latest', sub: `Straight from ${name}'s feed, newest first. Marked "single source" until a second newsroom confirms it`,
+        more: [host ? el('a', { class: 'btn ghost sm', href: 'https://' + host, target: '_blank', rel: 'noopener noreferrer', text: host + ' ↗' }) : null, navs] }, row);
+    });
+  }
+
   /* ================= the overview page ================= */
   function greet() { const h = new Date().getHours(); return h < 5 ? 'Good night' : h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'; }
   function viewHome(M) {
@@ -951,6 +997,8 @@
     if (top.length) { top.forEach((s) => shown.add(s.id));
       const sizes = { 1: ['wide'], 2: ['lg', 'lg'], 3: ['xl', 'md', 'md'], 4: ['xl', 'md', 'md', 'wide'], 5: ['xl', 'md', 'md', 'lg', 'lg'], 6: ['xl', 'md', 'md', 'sm', 'sm', 'sm'] }[top.length];
       M.append(sec(DAY ? 'Top stories of the day' : 'Top stories', { id: 'top', eyebrow: 'The day', sub: 'In order of importance' }, el('div', { class: 'bento' }, top.map((s, i) => rv(tileB(s, sizes[i]), i))))); }
+    const HL = headlinesSection(); if (HL) M.append(HL);
+    if (!DAY) spotlightSections().forEach((x) => M.append(x));
     /* market pulse */
     const order = ['btc', 'eth', 'spx', 'ndx', 'gold', 'oil', 'gas', 'dxy', 'eur', 'jpy', 'lkr'];
     const ms = order.map((k) => MK[k]).filter((m) => m && isNum(m.p));
@@ -996,6 +1044,7 @@
       ms.length ? rv(el('div', { class: 'mts' }, ms.map((m) => tile(m, true, 'today')), c === 'crypto' && D.fng ? fngGauge(D.fng) : null), 3) : null,
       c === 'economy' && (D.macro || []).some((x) => isNum(x.v)) ? rv(el('div', { class: 'mts', style: { marginTop: '12px' } }, ['us_cpi', 'us_unemp', 'us_fed', 'us_gdp'].map((k) => (D.macro || []).find((x) => x.k === k)).filter((x) => x && isNum(x.v)).map(macroTile)), 3) : null,
       Ls.length ? rv(el('div', { class: 'cta' }, el('button', { class: 'btn grad-btn', onclick: () => openBrief(c) }, el('span', { class: 'play' }, '▶'), 'Play this chapter')), 4) : null));
+    if (c === 'crypto' && !DAY) spotlightSections().forEach((x) => M.append(x));
     if (!Ls.length) return;
     const [first, ...rest] = Ls;
     const head = el('div', { class: 'bento' }, rv(tileB(first, 'xl'), 0)); rest.slice(0, 2).forEach((s, i) => head.append(rv(tileB(s, 'md'), i + 1)));
@@ -1035,7 +1084,7 @@
       el('div', null, el('div', { class: 'f-brand' }, el('span', { class: 'logo' }), 'Trading Desk Daily Brief'),
         el('p', null, el('b', { text: 'Only confirmed news. ' }), 'A story appears here only when two or more independent newsrooms report it, or when it comes straight from an official source (a government body, central bank, regulator or agency). ',
           'Single-source reports are kept out' + (D.unconfirmed_hidden ? ` (${D.unconfirmed_hidden} right now)` : '') + '. Sites that mostly republish others are never counted as a confirmation. ',
-          'Crypto prices are checked against a second source (✓). Headlines and short teasers come from each outlet\'s own feed; tap through to read the full story. Pictures are drawn from data, not news photos.')),
+          'Crypto prices are checked against a second source (✓). Headlines and short teasers come from each outlet\'s own feed; tap through to read the full story. Photos come from each outlet\'s own feed and are credited; where there is none, a picture is drawn from data.')),
       el('div', null, list.length ? el('details', null, el('summary', { text: `Sources · ${f.ok} of ${f.total} reachable` }),
         el('div', { class: 'fl' }, list.sort((a, b) => (a[1].ok === b[1].ok ? a[0].localeCompare(b[0]) : a[1].ok ? 1 : -1)).map(([n, h]) => el('span', { class: h.ok ? '' : 'bad', title: h.err || (h.n + ' headlines'), text: (h.ok ? '● ' : '○ ') + n })))) : null,
         el('p', { class: 'fine' }, 'Saved stories, watch words and what you have read stay on this device. ', el('button', { class: 'lnk', onclick: editWatch, text: 'Edit watch words' })))));
@@ -1066,7 +1115,8 @@
     const s = BYID[id] || stars[id] || LOGBY[id]; if (!s) return; markSeen(s.id); s.reports = s.reports || []; s.orgs = s.orgs || [];
     history.replaceState(null, '', '#s=' + id);
     openDrawer((p) => {
-      p.append(el('div', { class: 'dr-art' }, artFor(s, true)), el('button', { class: 'ib dr-x', onclick: closeDrawer, 'aria-label': 'Close', text: '✕' }));
+      p.append(el('div', { class: 'dr-art' + (s.img ? ' has-ph' : '') }, s.img ? photo(s.img, () => artFor(s, true), s.title) : artFor(s, true), s.img ? el('span', { class: 'dr-cr', text: 'Photo: ' + (s.img_o || s.orgs[0] || '') }) : null),
+        el('button', { class: 'ib dr-x', onclick: closeDrawer, 'aria-label': 'Close', text: '✕' }));
       const off = s.orgs.filter((o) => /SEC|Fed|ECB|Bank|BLS|IMF|United Nations|NASA|WHO|USGS|EIA/i.test(o)), ind = s.indep || s.orgs;
       const sure = s.status === 'OFFICIAL' ? `Comes from an official source (${off.join(', ') || s.orgs[0]})` + (s.n > 1 ? `, and ${s.n - 1} more outlet${s.n > 2 ? 's' : ''} report it too.` : '.')
         : `Confirmed by ${s.n} independent newsrooms: ${ind.join(', ')}.` + (s.orgs.length > ind.length ? ` Also carried by ${s.orgs.filter((o) => !ind.includes(o)).join(', ')}, which mostly republish others and are not counted.` : '');

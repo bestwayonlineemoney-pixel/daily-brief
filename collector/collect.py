@@ -172,6 +172,46 @@ def dek(raw, title):
     return t
 
 
+IMG_EXT = re.compile(r"\.(jpe?g|png|webp|avif)(\?|$)", re.I)
+IMG_TAG = re.compile(r"""<img[^>]+src=["']([^"']+)["']""", re.I)
+
+
+def _img_of(el, raw_html):
+    """The picture the outlet itself attaches to the item in its feed (media:content / media:thumbnail / enclosure / first <img>)."""
+    best, bw = None, -1
+    for c in el.iter():
+        ct = c.tag.rsplit("}", 1)[-1].lower()
+        url = c.get("url") or c.get("href")
+        if ct in ("content", "thumbnail", "enclosure", "link") and url and url.startswith("http"):
+            typ, med = (c.get("type") or ""), (c.get("medium") or "")
+            if ct == "link" and c.get("rel") != "enclosure":
+                continue
+            if not (typ.startswith("image") or med == "image" or ct == "thumbnail" or IMG_EXT.search(url)):
+                continue
+            try:
+                w = int(c.get("width") or 0)
+            except ValueError:
+                w = 0
+            w = w or (600 if ct == "content" else 300 if ct == "thumbnail" else 500)
+            if w > bw:
+                best, bw = url, w
+    if not best and raw_html:
+        m = IMG_TAG.search(raw_html)
+        if m and m.group(1).startswith("http") and not re.search(r"pixel|tracking|feedburner|1x1|gravatar|emoji", m.group(1), re.I):
+            best = m.group(1)
+    return html.unescape(best)[:500] if best else None
+
+
+def good_img(u):
+    """Only secure image links; ask BBC for a sharper version of its small feed thumbnail."""
+    if not u:
+        return None
+    if u.startswith("http://"):
+        u = "https://" + u[7:]
+    u = re.sub(r"(ichef\.bbci\.co\.uk/ace/(?:standard|ws))/\d+/", r"\1/800/", u)
+    return u if u.startswith("https://") else None
+
+
 def parse_feed(body):
     body = re.sub(rb"^\s+", b"", body)
     root = ET.fromstring(body)
@@ -198,6 +238,9 @@ def parse_feed(body):
             elif ct == "guid" and "link" not in d and (c.text or "").strip().startswith("http") and c.get("isPermaLink") != "false":
                 d["link"] = c.text.strip()
         if d.get("title") and str(d.get("link", "")).startswith(("http://", "https://")) and len(d["title"]) > 12:
+            im = _img_of(el, (d.get("desc") or "") + " " + (d.get("enc") or ""))
+            if im:
+                d["img"] = im
             d["desc"] = dek(d.get("desc") or d.pop("enc", ""), d["title"])
             d.pop("enc", None)
             out.append(d)
@@ -299,6 +342,7 @@ def build(stories, conf, now):
         text = " ".join(i["title"] for i in its)
         dk = next((i.get("d") for i in [lead] + sorted(recent, key=lambda i: (TIER_RANK.get(i["tier"], 3), -i["ts"]))
                    + sorted(its, key=lambda i: (TIER_RANK.get(i["tier"], 3), -i["ts"])) if i.get("d")), "")
+        pic = next((i for i in [lead] + sorted(its, key=lambda i: (TIER_RANK.get(i["tier"], 3), -i["ts"])) if i.get("img")), None)
         h = hot_of(text)
         pl = geo.places(lead["title"] + " · " + " · ".join(i["title"] for i in its[:6]), MAP)
         indep = sorted({i["org"] for i in its if i["org"] not in AGGREGATORS})
@@ -319,7 +363,8 @@ def build(stories, conf, now):
                     "first": int(s["first"]), "last": int(s["last"]), "score": round(score, 2), "hot": h,
                     "places": pl, "home": cat == "home" or any(p["c"] in homes for p in pl), "kw": kw_of(text),
                     "also": [k for k in MARKET_CATS if k != cat and RX[k].search(text)][:3],
-                    "developing": developing, "breaking": breaking, "reports": reports[-10:]})
+                    "developing": developing, "breaking": breaking, "reports": reports[-10:],
+                    **({"img": pic["img"], "img_o": pic["org"], "img_u": pic["link"]} if pic else {})})
     return out
 
 
@@ -654,6 +699,9 @@ def run(verbose=True):
                 fcat = feed.get("cat", "world")
                 store[it["link"]] = {"title": it["title"], "d": it.get("desc", ""), "link": it["link"], "ts": ts, "seen": seen, "src": feed["name"], "org": feed.get("org") or feed["name"],
                                      "tier": feed.get("tier", "news"), "fcat": fcat, "cat": classify(it["title"], fcat)}
+                im = good_img(it.get("img"))
+                if im:
+                    store[it["link"]]["img"] = im
     store = {k: v for k, v in store.items() if v["ts"] >= now - KEEP_H * 3600}
     write(STATE / "items.json", store)
 
@@ -718,6 +766,13 @@ def run(verbose=True):
     brief.setdefault("at", int(now))
     brief["top"] = top[:5]
 
+    spot = {}
+    in_story = {r["u"]: st["id"] for st in day for r in st.get("reports", [])}
+    for name in conf.get("spotlight_feeds", []):
+        L = sorted((v for v in store.values() if v["src"] == name and v["ts"] >= now - 36 * 3600), key=lambda v: -v["ts"])[:14]
+        if L:
+            spot[name] = [{"t": v["title"], "u": v["link"], "ts": int(v["ts"]), "d": v.get("d", ""), "img": v.get("img"), "sid": in_story.get(v["link"])} for v in L]
+
     ok = sum(1 for h in health.values() if h["ok"])
     local_date = (datetime.fromtimestamp(now, timezone.utc) + off).strftime("%Y-%m-%d")
     out = {"updated": int(now), "date": local_date, "utc_offset_hours": float(conf.get("utc_offset_hours", 0)), "home_title": conf.get("home_title", "Home"),
@@ -725,7 +780,7 @@ def run(verbose=True):
            "stories": final, "top": top, "counts": {k: len(by[k]) for k in CATS}, "total": len(day), "unconfirmed_hidden": unconfirmed if conf.get("verified_only", True) else 0,
            "rule": "Shown only when 2+ independent newsrooms report it, or it comes from an official source",
            "outlets": len({o for s in day for o in s["orgs"]}), "reports": sum(len(s["reports"]) for s in day),
-           "brief": brief, "markets": mk, "fng": fng, "macro": mac.get("rows", []), "calendar": mac.get("calendar"), "trader": tr, "pulse": {"start": h0, "cats": pulse},
+           "brief": brief, "markets": mk, "fng": fng, "macro": mac.get("rows", []), "calendar": mac.get("calendar"), "trader": tr, "spotlight": spot, "pulse": {"start": h0, "cats": pulse},
            "feeds": {"ok": ok, "total": len(feeds), "list": health}}
     write(DATA / "today.json", out)
 
@@ -750,7 +805,7 @@ def run(verbose=True):
 
     mok = sum(1 for r in mac.get("rows", []) if not r.get("err"))
     msg = (f"{len(day)} stories today from {out['outlets']} outlets · {ok}/{len(feeds)} sources OK · macro {mok}/{len(MACRO)}"
-           f"{' · calendar ' + str(len(mac['calendar'])) if mac.get('calendar') else ''} · summary: {brief['by']}{' (' + brief['model'] + ')' if brief.get('model') else ''}" + (f" · AI: {ai.provider()}" if ai.provider() else ""))
+           f"{' · calendar ' + str(len(mac['calendar'])) if mac.get('calendar') else ''} · photos {sum(1 for st in final if st.get('img'))}/{len(final)} · spotlight {sum(len(v) for v in spot.values())} · summary: {brief['by']}{' (' + brief['model'] + ')' if brief.get('model') else ''}" + (f" · AI: {ai.provider()}" if ai.provider() else ""))
     if verbose:
         print(time.strftime("%H:%M:%S"), msg, flush=True)
         bad = [n for n, h in health.items() if not h["ok"]]

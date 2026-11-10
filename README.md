@@ -17,7 +17,8 @@ The whole day, sorted and easy to read. Every few minutes it reads about 90 news
 - can send instant Telegram or Discord alerts for impact 8+/10 stories or watch words (add `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` or `DISCORD_WEBHOOK_URL` as GitHub secrets)
 - has a **Macro** page with the latest official numbers (inflation, jobs, interest rates, growth for the US, euro area, UK and Japan) straight from the BLS, BEA, Federal Reserve, Treasury, ECB and others via the St. Louis Fed's FRED, plus an optional calendar of upcoming releases
 - has a **5-minute brief**: a full-screen, swipe-through version of the day, one story per screen and chapter by chapter
-- shows each story's one-line teaser from the outlet, every report in order, and a picture drawn from data (a globe with the place marked, a price chart and so on; no news photos)
+- shows each story's one-line teaser from the outlet, every report in order, and the outlet's own photo from its feed (credited), or a picture drawn from data when there is none
+- has a **Headlines** strip: the most important confirmed stories as swipeable photo cards, plus a **CryptoSlate** strip with its latest headlines, marked single-source until another newsroom confirms them (add more sites with `spotlight_feeds` in `config.json`)
 - has a dark glass design with smooth animations, a live 3D globe and a bento layout
 - lets you save stories, copy them with their sources, search, set watch words, get alerts, and look back at earlier days
 
@@ -66,4 +67,4 @@ The footer of the page shows which sources were reachable on the last update.
 
 ## What is stored
 
-Only each headline, the outlet, the time and the link are stored. The app never stores article text or photos; you read the full story on the outlet's own site. Prices come from CoinGecko, Coinbase and Yahoo Finance, derivatives and liquidations from OKX, the economic calendar from Forex Factory, and the Fear & Greed index from alternative.me. These numbers are for the big picture, not for trading.
+Only each headline, the outlet, the time, the link and the link to the outlet's own feed photo are stored. The app never stores article text or copies photos; you read the full story on the outlet's own site. Prices come from CoinGecko, Coinbase and Yahoo Finance, derivatives and liquidations from OKX, the economic calendar from Forex Factory, and the Fear & Greed index from alternative.me. These numbers are for the big picture, not for trading.
