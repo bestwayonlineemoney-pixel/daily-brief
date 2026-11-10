@@ -99,9 +99,12 @@ def tag_story(s):
 
 
 def ai_tags(stories, now):
-    """Optional: Claude reads the top headlines and refines sentiment and the one-line 'why it matters'. Cached per story."""
-    key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
-    if not key:
+    """Optional: an AI model (Gemini or Claude) reads the top headlines and refines sentiment and the one-line 'why it matters'. Cached per story."""
+    try:
+        import ai
+    except Exception:  # noqa
+        return 0
+    if not ai.provider():
         return 0
     cache = NET["read"](NET["state"] / "ai_tags.json", {})
     cache = {k: v for k, v in cache.items() if v.get("at", 0) > now - 3 * 86400}
@@ -111,13 +114,10 @@ def ai_tags(stories, now):
         prompt = ("For each confirmed news headline below, judge its likely effect on crypto and other risk assets today. Reply with JSON only: "
                   '{"items":[{"id":"...","sentiment":"BULLISH|BEARISH|NEUTRAL","why":"one plain sentence, max 18 words, on why it matters for prices"}]}. '
                   "Be neutral and factual; NEUTRAL when unclear.\n\n" + lines)
-        body = json.dumps({"model": "claude-haiku-5-5", "max_tokens": 2000, "messages": [{"role": "user", "content": prompt}]}).encode()
         try:
-            j = json.loads(_get("https://api.anthropic.com/v1/messages", timeout=60, data=body,
-                                headers={"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json", "Accept-Encoding": "identity"}))
-            txt = "".join(b.get("text", "") for b in j.get("content", []))
-            m = re.search(r"\{.*\}", txt, re.S)
-            for it in (json.loads(m.group(0)).get("items", []) if m else []):
+            j, label = ai.ask_json(prompt, 2500)
+            print("  AI tags by", label, flush=True)
+            for it in j.get("items", []):
                 if it.get("id") and it.get("sentiment") in ("BULLISH", "BEARISH", "NEUTRAL"):
                     cache[str(it["id"])] = {"sentiment": it["sentiment"], "why": str(it.get("why", ""))[:200], "at": now}
         except Exception as e:  # noqa
@@ -140,24 +140,24 @@ COINS = [("BTC", "BTC-USD", "bitcoin"), ("ETH", "ETH-USD", "ethereum"), ("SOL", 
 
 
 def candles(sym, product, cg_id, now):
-    """15-minute closes for the last 24 hours: Coinbase Exchange (official exchange data), CoinGecko as backup."""
+    """15-minute candles (time, close, open, high, low, volume) for the last ~3 days: Coinbase Exchange, CoinGecko as backup."""
     try:
         rows = _json(f"https://api.exchange.coinbase.com/products/{product}/candles?granularity=900", timeout=20)
-        pts = sorted((int(r[0]), float(r[4])) for r in rows if int(r[0]) >= now - 24 * 3600 - 900)
-        if len(pts) > 40:
-            return pts, "Coinbase"
+        bars = sorted((int(r[0]), float(r[4]), float(r[3]), float(r[2]), float(r[1]), float(r[5])) for r in rows)
+        if len([b for b in bars if b[0] >= now - 24 * 3600]) > 40:
+            return bars, "Coinbase"
     except Exception:  # noqa
         pass
     try:
-        j = _json(f"https://api.coingecko.com/api/v3/coins/{cg_id}/market_chart?vs_currency=usd&days=1", timeout=20)
+        j = _json(f"https://api.coingecko.com/api/v3/coins/{cg_id}/market_chart?vs_currency=usd&days=2", timeout=20)
         raw = [(int(t / 1000), float(p)) for t, p in j["prices"]]
-        pts, last = [], 0
+        bars, last = [], 0
         for t, p in raw:                              # thin 5-minute points to 15 minutes
             if t - last >= 870:
-                pts.append((t, p))
+                bars.append((t, p, p, p, p, 0.0))
                 last = t
-        if len(pts) > 40:
-            return pts, "CoinGecko"
+        if len(bars) > 40:
+            return bars, "CoinGecko"
     except Exception:  # noqa
         pass
     return [], None
@@ -198,6 +198,8 @@ def relevant(s, sym):
         return "GOLD" in a or bool(a & {"DXY", "OIL"}) or s["cat"] in ("war", "commodities") or s.get("macro")
     if sym == "SPX":
         return "SPX" in a or "DXY" in a or s.get("macro") or (s["cat"] in ("tech", "economy", "war", "energy") and s.get("impact", 0) >= 6)
+    if sym == "OIL":
+        return bool(a & {"OIL", "GAS"}) or s["cat"] == "energy" or (s["cat"] == "war" and s.get("impact", 0) >= 5) or (s.get("macro") and s.get("impact", 0) >= 7)
     return False
 
 
@@ -220,24 +222,52 @@ def match_news(move, sym, stories):
 
 
 def yahoo_intraday(sym, now):
-    """15-minute prices from Yahoo Finance (exchange data, about 15 minutes delayed). Last 24h; for stocks, the last sessions."""
+    """15-minute candles from Yahoo Finance (exchange data, about 15 minutes delayed), last 5 days: (time, close, open, high, low, volume)."""
     for host in ("query1", "query2"):
         try:
             j = _json(f"https://{host}.finance.yahoo.com/v8/finance/chart/{urllib.request.quote(sym)}?range=5d&interval=15m", timeout=20)
             r = j["chart"]["result"][0]
-            pts = [(int(t), float(c)) for t, c in zip(r["timestamp"], r["indicators"]["quote"][0]["close"]) if c is not None]
-            day = [p for p in pts if p[0] >= now - 24 * 3600]
-            return (day if len(day) >= 24 else pts[-60:]), "Yahoo Finance · 15-min delay"
+            q = r["indicators"]["quote"][0]
+            n = len(r["timestamp"])
+            col = lambda k: (q.get(k) or [None] * n) + [None] * max(0, n - len(q.get(k) or []))  # noqa
+            bars = []
+            for t, c, o, h, lo, v in zip(r["timestamp"], col("close"), col("open"), col("high"), col("low"), col("volume")):
+                if c is None:
+                    continue
+                o, h, lo = (o if o is not None else c), (h if h is not None else c), (lo if lo is not None else c)
+                bars.append((int(t), float(c), float(o), float(max(h, o, c)), float(min(lo, o, c)), float(v or 0)))
+            if bars:
+                return bars, "Yahoo Finance · 15-min delay"
         except Exception:  # noqa
             continue
     return [], None
 
 
+def day_window(bars, now):
+    """The last 24 hours; for markets that were shut (weekends, stocks overnight), the last 60 bars."""
+    day = [b for b in bars if b[0] >= now - 24 * 3600]
+    return day if len(day) >= 24 else bars[-60:]
+
+
+def levels(day, prev):
+    """Key levels traders watch: 24h high/low and open, the previous window's high/low/close, the volume-weighted average price, ranges."""
+    hi, lo, op = max(b[3] for b in day), min(b[4] for b in day), day[0][2]
+    vol = sum(b[5] for b in day)
+    out = {"hi24": hi, "lo24": lo, "open24": op, "rng": round((hi - lo) / op * 100, 2) if op else None}
+    if vol > 0:
+        out["vwap"] = sum((b[3] + b[4] + b[1]) / 3 * b[5] for b in day) / vol
+    if len(prev) >= 8:
+        ph, pl = max(b[3] for b in prev), min(b[4] for b in prev)
+        out.update(pdh=ph, pdl=pl, pdc=prev[-1][1], prng=round((ph - pl) / prev[0][2] * 100, 2) if prev[0][2] else None)
+    nd = 2 if day[-1][1] > 10 else 4
+    return {k: (round(v, nd) if isinstance(v, float) and k not in ("rng", "prng") else v) for k, v in out.items()}
+
+
 def price_at(pts, t):
     best = None
-    for pt, p in pts:
-        if pt <= t:
-            best = p
+    for p in pts:
+        if p[0] <= t:
+            best = p[1]
         else:
             break
     return best if best is not None else (pts[0][1] if pts else None)
@@ -276,24 +306,42 @@ def markers(sym, pts, moves, stories):
     return out
 
 
+def thin(v, n=48):
+    if len(v) <= n:
+        return v
+    step = len(v) / n
+    return [v[int(i * step)] for i in range(n)] + [v[-1]]
+
+
 def catalysts(stories, now):
-    out = {}
-    jobs = [(sym, (lambda c=c: candles(c[1], c[1], c[2], now))) for c in COINS for sym in [c[0]]] + \
-           [("GOLD", lambda: yahoo_intraday("GC=F", now)), ("SPX", lambda: yahoo_intraday("^GSPC", now))]
-    with ThreadPoolExecutor(5) as ex:
+    """Price x news for each chart: 15-minute candles, key levels, big moves and the confirmed news around them.
+    Also returns 24h sparklines for the price bar (including the dollar index and the 10-year yield)."""
+    out, sparks = {}, {}
+    jobs = [(c[0], (lambda c=c: candles(c[1], c[1], c[2], now))) for c in COINS] + \
+           [("GOLD", lambda: yahoo_intraday("GC=F", now)), ("SPX", lambda: yahoo_intraday("^GSPC", now)), ("OIL", lambda: yahoo_intraday("BZ=F", now)),
+            ("DXY", lambda: yahoo_intraday("DX-Y.NYB", now)), ("TNX", lambda: yahoo_intraday("^TNX", now))]
+    with ThreadPoolExecutor(8) as ex:
         res = list(ex.map(lambda j: (j[0], j[1]()), jobs))
-    for sym, (pts, src) in res:
-        if not pts or len(pts) < 12:
+    for sym, (bars, src) in res:
+        if not bars or len(bars) < 12:
             continue
+        day = day_window(bars, now)
+        sparks[sym] = [round(b[1], 4) for b in thin(day)]
+        if sym in ("DXY", "TNX"):
+            continue
+        prev = [b for b in bars if b[0] < day[0][0]][-len(day):]
+        pts = [(b[0], b[1]) for b in day]
         moves = find_moves(pts) if sym in ("BTC", "ETH", "SOL") else [m for m in find_moves(pts) if abs(m["chg"]) >= 0.4]
         for m in moves:
             st = match_news(m, sym, stories)
             m["story"] = st["id"] if st else None
         nd = 2 if pts[-1][1] > 10 else 4
-        out[sym] = {"src": src, "pts": [[t, round(p, nd)] for t, p in pts], "moves": moves, "news": markers(sym, pts, moves, stories),
-                    "chg24": round((pts[-1][1] / pts[0][1] - 1) * 100, 2), "hi": max(p for _, p in pts), "lo": min(p for _, p in pts),
-                    "live": sym in ("BTC", "ETH", "SOL")}
-    return out
+        vd = 4 if sym in ("BTC", "ETH") else 2
+        out[sym] = {"src": src, "pts": [[b[0], round(b[1], nd), round(b[2], nd), round(b[3], nd), round(b[4], nd), round(b[5], vd)] for b in day],
+                    "moves": moves, "news": markers(sym, pts, moves, stories),
+                    "chg24": round((day[-1][1] / (prev[-1][1] if prev and sym in ("GOLD", "SPX", "OIL") else day[0][2]) - 1) * 100, 2),
+                    "hi": max(b[3] for b in day), "lo": min(b[4] for b in day), "lv": levels(day, prev), "live": sym in ("BTC", "ETH", "SOL")}
+    return out, sparks
 
 
 # ---------------- derivatives & positioning ----------------
@@ -313,9 +361,101 @@ def _okx(sym):
         h = _json(f"https://www.okx.com/api/v5/rubik/stat/contracts/open-interest-volume?ccy={sym}&period=1H", timeout=15)["data"]
         if len(h) > 24:
             d["oi_chg"] = (float(h[0][1]) / float(h[24][1]) - 1) * 100
+            d["oi_spark"] = [round(float(x[1]) / 1e6, 1) for x in reversed(h[:25])]       # USD millions, oldest first
+        if len(h) > 168:
+            d["oi_chg7"] = (float(h[0][1]) / float(h[168][1]) - 1) * 100
+    except Exception:  # noqa
+        pass
+    try:   # orderflow: who is hitting the market - taker buys vs taker sells, USD, hourly, last 24h
+        tv = _json(f"https://www.okx.com/api/v5/rubik/stat/taker-volume-contract?instId={inst}&period=1H&unit=2&limit=24", timeout=15)["data"]
+        rows = sorted((int(r[0]) // 1000, float(r[1]), float(r[2])) for r in tv)          # (ts, sell, buy)
+        if rows:
+            cvd, acc = [], 0.0
+            for _, s, b in rows:
+                acc += b - s
+                cvd.append(round(acc / 1e6, 1))
+            d["flow"] = {"buy": round(sum(r[2] for r in rows)), "sell": round(sum(r[1] for r in rows)), "buy1h": round(rows[-1][2]), "sell1h": round(rows[-1][1]),
+                         "cvd": cvd, "h": len(rows), "src": "OKX taker volume"}
     except Exception:  # noqa
         pass
     return d
+
+
+LIQ_CT = {}
+
+
+def _okx_liqs(sym, db, now):
+    """Liquidations on OKX USDT perpetuals, kept in our own 24h memory (OKX serves the last day page by page)."""
+    fam = f"{sym}-USDT"
+    if sym not in LIQ_CT:
+        LIQ_CT[sym] = float(_json(f"https://www.okx.com/api/v5/public/instruments?instType=SWAP&instId={fam}-SWAP", timeout=15)["data"][0]["ctVal"])
+    ct = LIQ_CT[sym]
+    rec = db.get(sym) or {}
+    ev = rec.get("ev", [])
+    seen = {(e[0], e[3], e[2]) for e in ev}
+    newest = max((e[0] for e in ev), default=0)
+    cutoff = int((now - 24 * 3600) * 1000)
+    after, pages, oldest_fetched, reached = None, 0, None, False
+    max_pages = 40 if not ev else 12
+    while pages < max_pages:
+        url = f"https://www.okx.com/api/v5/public/liquidation-orders?instType=SWAP&instFamily={fam}&state=filled&limit=100" + (f"&after={after}" if after else "")
+        data = _json(url, timeout=15).get("data") or []
+        det = data[0].get("details", []) if data else []
+        if not det:
+            reached = True
+            break
+        stop = False
+        for x in det:
+            ts = int(x["ts"])
+            if ts <= newest or ts < cutoff:
+                stop = True
+                continue
+            px, sz = float(x.get("bkPx") or 0), float(x.get("sz") or 0)
+            usd = round(sz * ct * px)
+            ps = x.get("posSide")
+            side = "L" if ps == "long" or (ps not in ("long", "short") and x.get("side") == "sell") else "S"
+            k = (ts, px, usd)
+            if k not in seen and usd > 0:
+                seen.add(k)
+                ev.append([ts, side, usd, px])
+        after = det[-1]["ts"]
+        oldest_fetched = int(after)
+        pages += 1
+        if stop or int(after) < cutoff:
+            reached = True
+            break
+    ev = sorted((e for e in ev if e[0] >= cutoff), key=lambda e: e[0])[-20000:]
+    since = rec.get("since")
+    if not since or not rec.get("ev"):
+        since = cutoff // 1000 if reached else (oldest_fetched or int(now * 1000)) // 1000
+    since = max(since, cutoff // 1000)
+    db[sym] = {"ev": ev, "since": since}
+    t1h = int((now - 3600) * 1000)
+    hours = [[0, 0] for _ in range(24)]
+    for e in ev:
+        i = min(23, max(0, int((e[0] / 1000 - (now - 24 * 3600)) // 3600)))
+        hours[i][0 if e[1] == "L" else 1] += e[2]
+    big = max(ev, key=lambda e: e[2]) if ev else None
+    return {"long": sum(e[2] for e in ev if e[1] == "L"), "short": sum(e[2] for e in ev if e[1] == "S"), "n": len(ev),
+            "long1h": sum(e[2] for e in ev if e[1] == "L" and e[0] >= t1h), "short1h": sum(e[2] for e in ev if e[1] == "S" and e[0] >= t1h),
+            "big": {"usd": big[2], "side": big[1], "px": big[3], "t": big[0] // 1000} if big else None,
+            "hours": hours, "cover_h": round(min(24, (now - since) / 3600), 1), "src": "OKX USDT perps", "pages": pages}
+
+
+def liquidations(now):
+    db = NET["read"](NET["state"] / "liqs.json", {})
+    out = {}
+
+    def one(sym):
+        try:
+            return sym, _okx_liqs(sym, db, now)
+        except Exception as e:  # noqa
+            return sym, {"err": str(e)[:80]}
+    with ThreadPoolExecutor(3) as ex:
+        for sym, r in ex.map(one, ("BTC", "ETH", "SOL")):
+            out[sym] = r
+    NET["write"](NET["state"] / "liqs.json", db)
+    return out
 
 
 def _binance(sym):
@@ -521,6 +661,54 @@ def fomc_dates(now):
     return cache.get("dates", [])
 
 
+CUR_NAME = {"USD": "US", "EUR": "Euro area", "GBP": "UK", "JPY": "Japan", "CNY": "China", "CAD": "Canada", "AUD": "Australia", "NZD": "New Zealand", "CHF": "Switzerland"}
+
+
+def econ_calendar(now):
+    """High-impact economic events with exact times, forecast and previous: the Forex Factory weekly calendar (refreshed hourly),
+    with FOMC decisions confirmed against the Federal Reserve's own calendar. Times are UTC seconds; the page shows your local time."""
+    cache = NET["read"](NET["state"] / "ffcal.json", {})
+    rows = cache.get("rows") or []
+    if cache.get("at", 0) < now - 3600 or not rows:
+        try:
+            j = _json("https://nfs.faireconomy.media/ff_calendar_thisweek.json", timeout=20)
+            if isinstance(j, list) and j:
+                rows = j
+                NET["write"](NET["state"] / "ffcal.json", {"at": int(now), "rows": rows})
+        except Exception as e:  # noqa
+            print("  economic calendar skipped:", str(e)[:100])
+    out = []
+    for r in rows:
+        if r.get("impact") != "High":
+            continue
+        try:
+            t = int(datetime.fromisoformat(r["date"]).timestamp())
+        except Exception:  # noqa
+            continue
+        if now - 12 * 3600 <= t <= now + 8 * 86400:
+            out.append({"t": t, "title": r.get("title", ""), "cur": r.get("country", ""), "where": CUR_NAME.get(r.get("country", ""), r.get("country", "")),
+                        "f": r.get("forecast") or "", "p": r.get("previous") or "", "src": "Forex Factory"})
+    # FOMC decisions from the Fed (2:00 pm New York time): confirms the calendar, and fills in weeks the weekly calendar does not cover yet
+    try:
+        from zoneinfo import ZoneInfo
+        ny = ZoneInfo("America/New_York")
+        for d in fomc_dates(now):
+            y, m, dd = (int(x) for x in d["date"].split("-"))
+            t = int(datetime(y, m, dd, 14, 0, tzinfo=ny).timestamp())
+            if not (now - 12 * 3600 <= t <= now + 45 * 86400):
+                continue
+            same = [e for e in out if e["cur"] == "USD" and abs(e["t"] - t) <= 3600 and re.search(r"federal funds|fomc", e["title"], re.I)]
+            if same:
+                for e in same:
+                    e["src"] = "Forex Factory · ✓ Federal Reserve calendar"
+            else:
+                out.append({"t": t, "title": "FOMC rate decision" + (" + projections" if d.get("sep") else ""), "cur": "USD", "where": "US", "f": "", "p": "", "src": "Federal Reserve"})
+    except Exception as e:  # noqa
+        print("  FOMC times skipped:", str(e)[:80])
+    out.sort(key=lambda e: e["t"])
+    return out[:40]
+
+
 RELEASE = re.compile(r"\b(cpi|consumer price|inflation rate|fomc|rate decision|interest rate decision|keeps rates|holds rates|cuts rates|raises rates|"
                      r"payrolls|jobs report|nonfarm|unemployment rate|gdp|pce)\b", re.I)
 
@@ -543,6 +731,85 @@ def events(stories, calendar, now):
     up.sort(key=lambda e: e["date"])
     out_today = [s["id"] for s in stories if RELEASE.search(s["title"]) and s["last"] >= now - 18 * 3600 and (s.get("status") == "OFFICIAL" or s.get("n", 1) >= 3)][:4]
     return {"upcoming": up[:8], "released": out_today}
+
+
+# ---------------- crypto market breadth ----------------
+STABLE = {"usdt", "usdc", "dai", "fdusd", "usde", "tusd", "pyusd", "usds", "usdd", "frax", "busd", "usd1", "rlusd", "bsc-usd", "usdtb", "susde", "susds", "gusd", "usdp",
+          "lusd", "eurc", "buidl", "usyc", "ustb", "usdf", "usdg", "usd0", "usdx", "crvusd", "gho", "dola", "usdy", "ousg", "syrupusdc", "bfusd", "usdai", "usdb", "eurs"}
+SKIP_NAME = re.compile(r"wrapped|staked|bridged|restak|liquid staking|tokenized|\bheloc\b|binance-peg|\bjito\b|\bweth\b", re.I)
+SKIP_SYM = {"wbtc", "weth", "steth", "wsteth", "weeth", "reth", "cbbtc", "cbeth", "wbeth", "jitosol", "msol", "bnsol", "lbtc", "solvbtc", "meth", "ezeth", "rseth",
+            "xaut", "paxg", "bsol", "tbtc", "clbtc", "wbnb", "figr_heloc", "lseth", "oseth", "sweth", "kbtc", "fbtc", "unibtc", "pumpbtc", "eeth"}
+
+
+def breadth():
+    """How the whole crypto market is doing, not just bitcoin: dominance, total value, how many of the top coins are up, biggest movers."""
+    try:
+        rows = _json("https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=100&page=1&price_change_percentage=24h", timeout=20)
+        g = _json("https://api.coingecko.com/api/v3/global", timeout=20)["data"]
+    except Exception as e:  # noqa
+        print("  breadth skipped:", str(e)[:100])
+        return None
+    L = []
+    for r in rows:
+        sym, ch, p = (r.get("symbol") or "").lower(), r.get("price_change_percentage_24h"), r.get("current_price")
+        if ch is None or not p or sym in STABLE or sym in SKIP_SYM or SKIP_NAME.search(r.get("name") or "") or SKIP_NAME.search(r.get("id") or ""):
+            continue
+        if 0.97 <= p <= 1.03 and abs(ch) < 1:            # anything else that behaves like a dollar stablecoin
+            continue
+        L.append({"sym": sym.upper(), "name": r.get("name", ""), "chg": round(ch, 2), "p": p, "rank": r.get("market_cap_rank")})
+    if len(L) < 20:
+        return None
+    up = sum(1 for x in L if x["chg"] > 0)
+    srt = sorted(L, key=lambda x: -x["chg"])
+    chs = sorted(x["chg"] for x in L)
+    mp = g.get("market_cap_percentage") or {}
+    return {"n": len(L), "up": up, "down": len(L) - up, "median": round(chs[len(chs) // 2], 2), "gainers": srt[:5], "losers": srt[::-1][:5],
+            "dom_btc": round(mp.get("btc", 0), 2), "dom_eth": round(mp.get("eth", 0), 2), "mcap": (g.get("total_market_cap") or {}).get("usd"),
+            "mcap_chg": round(g.get("market_cap_change_percentage_24h_usd") or 0, 2), "src": "CoinGecko · top 100 by value, stablecoins and wrapped tokens left out"}
+
+
+# ---------------- AI trader brief (Gemini or Claude, when a key is set) ----------------
+def ai_trader_brief(out, mk, stories, now):
+    """A short neutral read of the trading day written by AI from the numbers on the page. Refreshed hourly; never advice."""
+    try:
+        import ai
+    except Exception:  # noqa
+        return None
+    if not ai.provider():
+        return None
+    prev = NET["read"](NET["state"] / "ai_trader.json", {})
+    drv = out.get("drivers") or []
+    if prev.get("bullets") and now - prev.get("at", 0) < 3600 and prev.get("drivers") == drv:
+        return prev
+    by = {s["id"]: s for s in stories}
+    m = {x["k"]: x for x in mk if x.get("p") is not None}
+    data = {
+        "regime": (out.get("regime") or {}).get("label"), "regime_reasons": [w[1] for w in (out.get("regime") or {}).get("why", [])],
+        "prices_24h_change_pct": {k: round(m[k]["chg"], 2) for k in ("btc", "eth", "sol", "gold", "oil", "spx", "dxy", "tnx", "vix") if k in m and m[k].get("chg") is not None},
+        "key_news": [{"title": by[i]["title"], "why": by[i].get("why", ""), "tone": by[i].get("sentiment")} for i in drv if i in by],
+        "events_next_24h": [{"event": e["where"] + " " + e["title"], "hours_from_now": round((e["t"] - now) / 3600, 1), "forecast": e["f"], "previous": e["p"]}
+                            for e in (out.get("cal") or []) if now - 2 * 3600 <= e["t"] <= now + 24 * 3600][:6],
+        "derivatives": {k: {"signal": v.get("signal"), "funding_8h_pct": v.get("funding"), "long_short": v.get("ls"), "oi_24h_pct": v.get("oi_chg")}
+                        for k, v in (out.get("derivatives") or {}).items() if isinstance(v, dict) and not v.get("err")},
+        "liquidations_24h_usd": {k: {"longs": v.get("long"), "shorts": v.get("short")} for k, v in (out.get("liqs") or {}).items() if isinstance(v, dict) and not v.get("err")},
+        "levels": {k: {kk: v["lv"].get(kk) for kk in ("hi24", "lo24", "vwap", "pdh", "pdl")} | {"last": v["pts"][-1][1]} for k, v in (out.get("catalysts") or {}).items() if v.get("lv")},
+        "breadth": {k: (out.get("breadth") or {}).get(k) for k in ("up", "down", "dom_btc", "mcap_chg")} if out.get("breadth") else None,
+    }
+    prompt = ("You are writing the 'Trader's brief' box of a personal market dashboard. From the JSON below only, write 4 or 5 bullets that give a trader "
+              "the picture of the day: market mood, event risk, positioning and leverage, key price levels, and the news that matters. Rules: plain English, "
+              "max 24 words per bullet, neutral and factual, no advice, no buy/sell calls, no price predictions, never invent numbers, never mention clock times "
+              "(the page shows times and countdowns), round prices sensibly. Reply with JSON only: "
+              '{"bullets":[{"k":"mood|event|positioning|levels|news|breadth","text":"..."}]}\n\n' + json.dumps(data, default=str))
+    try:
+        j, label = ai.ask_json(prompt, 900)
+        bl = [{"k": str(b.get("k", "news"))[:12], "text": str(b.get("text", ""))[:240]} for b in j.get("bullets", []) if b.get("text")][:5]
+        if bl:
+            res = {"bullets": bl, "at": int(now), "by": label, "drivers": drv}
+            NET["write"](NET["state"] / "ai_trader.json", res)
+            return res
+    except Exception as e:  # noqa
+        print("  AI trader brief skipped:", str(e)[:140])
+    return prev if prev.get("bullets") and now - prev.get("at", 0) < 4 * 3600 else None
 
 
 # ---------------- alerts (Telegram / Discord) ----------------
@@ -624,18 +891,33 @@ def run(day_stories, final_stories, mk, fng, calendar, watch, now):
     ai = ai_tags(sorted(final_stories, key=lambda s: -s["score"]), now)
     prices = {x["k"].upper(): x["p"] for x in mk if x.get("p") is not None}
     chg24 = {x["k"].upper(): x.get("chg") for x in mk}
-    cat = catalysts(final_stories, now)
-    der = derivatives(prices, chg24, now)
-    out = {"regime": regime(mk, fng), "drivers": drivers(final_stories, now), "narratives": narratives(final_stories, now), "catalysts": cat,
-           "derivatives": der, "events": events(final_stories, calendar, now), "ai_tags": ai}
+    def safe(name, f, default=None):
+        try:
+            return f()
+        except Exception as e:  # noqa  - one broken source never stops the rest
+            print(f"  {name} error:", repr(e)[:160], flush=True)
+            return default
+    cat, sparks = safe("charts", lambda: catalysts(final_stories, now), ({}, {}))
+    der = safe("derivatives", lambda: derivatives(prices, chg24, now), {})
+    liq = safe("liquidations", lambda: liquidations(now), {})
+    out = {"regime": regime(mk, fng), "drivers": drivers(final_stories, now), "narratives": narratives(final_stories, now), "catalysts": cat, "sparks": sparks,
+           "derivatives": der, "liqs": liq, "events": events(final_stories, calendar, now), "cal": safe("calendar", lambda: econ_calendar(now), []),
+           "breadth": safe("breadth", breadth), "ai_tags": ai}
+    out["ai_brief"] = safe("AI trader brief", lambda: ai_trader_brief(out, mk, final_stories, now))
     out["alerts_sent"] = alerts(final_stories, watch, prices.get("BTC"), now)
     if NET.get("arch"):
         out["logged"] = keylog(final_stories, out["drivers"], mk, now)
     srcs = {v.get("src") for v in der.values() if isinstance(v, dict) and v.get("src")}
-    cs = ",".join(k + "=" + str(v["src"]) for k, v in cat.items()) or "none"
-    print(f"  trader: candles {cs} · derivatives {','.join(sorted(srcs)) or 'none'}"
+    cs = ",".join(k + "=" + str(v["src"]).split(" ")[0] for k, v in cat.items()) or "none"
+    lq = ",".join(f"{k}=${(v.get('long', 0) + v.get('short', 0)) / 1e6:.1f}M/{v.get('cover_h')}h/{v.get('pages')}p" if not v.get("err") else f"{k}=ERR {v['err']}" for k, v in liq.items())
+    fl = ",".join(k for k, v in der.items() if isinstance(v, dict) and v.get("flow"))
+    nxt = next((e for e in out["cal"] if e["t"] > now), None)
+    br = out.get("breadth") or {}
+    print(f"  trader: candles {cs} · derivatives {','.join(sorted(srcs)) or 'none'} · flow {fl or 'none'} · liqs {lq or 'none'}"
           f" · L/S {','.join(sorted({v.get('ls_src', '-') for v in der.values() if isinstance(v, dict)}))} · regime {out['regime']['label']}"
-          f" · events {len(out['events']['upcoming'])} upcoming · alerts {out['alerts_sent']} · key events +{out.get('logged', 0)}", flush=True)
+          f" · calendar {len(out['cal'])} high-impact" + (f" (next {nxt['cur']} {nxt['title']} in {(nxt['t'] - now) / 3600:.1f}h)" if nxt else "") +
+          f" · breadth {br.get('up', '-')}/{br.get('n', '-')} up · AI brief {(out['ai_brief'] or {}).get('by', 'off')}"
+          f" · alerts {out['alerts_sent']} · key events +{out.get('logged', 0)}", flush=True)
     errs = {k: v["err"] for k, v in der.items() if isinstance(v, dict) and v.get("err")}
     if errs:
         print("  derivatives errors:", errs, flush=True)
