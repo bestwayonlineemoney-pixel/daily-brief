@@ -130,6 +130,11 @@ def _gemini(prompt, max_tokens):
                     if e.code == 404:
                         cool[model] = now + 7 * 86400
                         break
+                    if e.code >= 500:                # Google overloaded: rest the model briefly; two in a row means it is busy everywhere
+                        cool[model] = now + 10 * 60
+                        if sum(1 for t in tried if t.endswith(("=500", "=502", "=503", "=504"))) >= 2:
+                            raise RuntimeError(f"Gemini is busy right now (HTTP {e.code}), will retry next run")
+                        break
                     if e.code == 400 and think:
                         continue                    # retry the same model without the thinking setting
                     break
