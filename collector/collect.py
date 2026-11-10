@@ -301,17 +301,21 @@ def group(items):
         for s in stories[-900:]:
             if it["ts"] - s["last"] > GROUP_GAP:
                 continue
-            shared = len(tok & s["tok"])
-            if shared < 3:
-                continue
-            sc = shared / max(1, min(len(tok), len(s["core"])))
+            if len(tok & s["tok"]) < 3 or len(tok & s["core"]) < 2:
+                continue                 # must share real words with the story's first headline, so a story can never drift onto another topic
+            sc = 0
+            for t2 in s["toks"]:         # compare with each headline on its own, never with all their words pooled together
+                sh = len(tok & t2)
+                if sh >= 3:
+                    sc = max(sc, sh / max(1, min(len(tok), len(t2))))
             if sc >= 0.5 and sc > best_s:
                 best, best_s = s, sc
         if best is None:
-            stories.append({"tok": set(tok), "core": set(tok), "items": [it], "first": it["ts"], "last": it["ts"]})
+            stories.append({"tok": set(tok), "core": set(tok), "toks": [tok], "items": [it], "first": it["ts"], "last": it["ts"]})
         else:
             best["items"].append(it)
             best["tok"] |= tok
+            best["toks"] = (best["toks"] + [tok])[-40:]
             best["last"] = max(best["last"], it["ts"])
     return stories
 
@@ -342,7 +346,9 @@ def build(stories, conf, now):
         text = " ".join(i["title"] for i in its)
         dk = next((i.get("d") for i in [lead] + sorted(recent, key=lambda i: (TIER_RANK.get(i["tier"], 3), -i["ts"]))
                    + sorted(its, key=lambda i: (TIER_RANK.get(i["tier"], 3), -i["ts"])) if i.get("d")), "")
-        pic = next((i for i in [lead] + sorted(its, key=lambda i: (TIER_RANK.get(i["tier"], 3), -i["ts"])) if i.get("img")), None)
+        lt = tokens(lead["title"])          # the photo must belong to a headline that says the same thing as the lead headline
+        pic = next((i for i in [lead] + sorted(its, key=lambda i: (TIER_RANK.get(i["tier"], 3), -i["ts"]))
+                    if i.get("img") and (i is lead or len(tokens(i["title"]) & lt) / max(1, min(len(lt), len(tokens(i["title"])))) >= 0.6)), None)
         h = hot_of(text)
         pl = geo.places(lead["title"] + " · " + " · ".join(i["title"] for i in its[:6]), MAP)
         indep = sorted({i["org"] for i in its if i["org"] not in AGGREGATORS})
@@ -805,7 +811,7 @@ def run(verbose=True):
 
     mok = sum(1 for r in mac.get("rows", []) if not r.get("err"))
     msg = (f"{len(day)} stories today from {out['outlets']} outlets · {ok}/{len(feeds)} sources OK · macro {mok}/{len(MACRO)}"
-           f"{' · calendar ' + str(len(mac['calendar'])) if mac.get('calendar') else ''} · photos {sum(1 for st in final if st.get('img'))}/{len(final)} · spotlight {sum(len(v) for v in spot.values())} · summary: {brief['by']}{' (' + brief['model'] + ')' if brief.get('model') else ''}" + (f" · AI: {ai.provider()}" if ai.provider() else ""))
+           f"{' · calendar ' + str(len(mac['calendar'])) if mac.get('calendar') else ''} · biggest story {max([st['n'] for st in final] or [0])} newsrooms · photos {sum(1 for st in final if st.get('img'))}/{len(final)} · spotlight {sum(len(v) for v in spot.values())} · summary: {brief['by']}{' (' + brief['model'] + ')' if brief.get('model') else ''}" + (f" · AI: {ai.provider()}" if ai.provider() else ""))
     if verbose:
         print(time.strftime("%H:%M:%S"), msg, flush=True)
         bad = [n for n, h in health.items() if not h["ok"]]
