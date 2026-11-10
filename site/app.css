@@ -757,3 +757,5 @@ body.chatting .ai-fab,body.lock .ai-fab{opacity:0;pointer-events:none}
   .imp{padding:14px}.imp-b{grid-template-columns:1fr;gap:14px}.imp-hl{font-size:15.5px}.ias{grid-template-columns:1fr}
   .chat-panel{top:0;right:0;bottom:0;width:100%;border-radius:0;transform:translateY(102%)}
 }
+
+.key-msg{color:#FCA5A5!important;font-size:13px!important;min-height:0}.key-msg:empty{display:none}

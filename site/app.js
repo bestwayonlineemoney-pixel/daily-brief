@@ -1109,9 +1109,22 @@
     }
     if (!aiKey()) {
       const inp = el('input', { type: 'password', placeholder: 'Paste your Gemini API key', autocomplete: 'off', spellcheck: 'false' });
+      const msg = el('p', { class: 'key-msg' });
       body.append(el('div', { class: 'chat-key' }, el('span', { class: 'ai-orb xl' }), el('h3', { text: 'Connect Gemini to chat' }),
         el('p', { text: 'Paste a Gemini API key once. It is saved only in this browser on this device and is sent only to Google. It is never put on GitHub or in the page.' }),
-        inp, el('button', { class: 'btn grad-btn', onclick: () => { const v = inp.value.trim(); if (!/^[A-Za-z0-9_\-]{20,}$/.test(v)) { toast('That does not look like a Gemini key'); return; } S.set('gemkey', v); chatRender(); setTimeout(() => $('chatQ').focus(), 50); }, text: 'Save and start' }),
+        inp, msg, el('button', { class: 'btn grad-btn', onclick: async (e) => {
+          /* accept the key however it was copied: spaces, quotes or a "GEMINI_API_KEY=" prefix are removed */
+          const v = inp.value.replace(/^\s*(export\s+)?[A-Z_]*KEY\s*[=:]\s*/i, '').replace(/["'`\s]/g, '');
+          if (v.length < 20) { msg.textContent = 'The key looks too short. Copy the whole key from Google AI Studio.'; return; }
+          const b = e.currentTarget; b.disabled = true; b.textContent = 'Checking with Google…'; msg.textContent = '';
+          try {
+            const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=1', { headers: { 'x-goog-api-key': v } });
+            if (r.ok || r.status === 429) { S.set('gemkey', v); chatRender(); setTimeout(() => $('chatQ').focus(), 50); return; }
+            let m = ''; try { m = ((await r.json()).error || {}).message || ''; } catch (x) { /* */ }
+            msg.textContent = 'Google did not accept this key' + (m ? ': ' + m.slice(0, 120) : ' (' + r.status + ')') + '. Copy it again from Google AI Studio.';
+          } catch (x) { S.set('gemkey', v); chatRender(); return; }
+          b.disabled = false; b.textContent = 'Save and start';
+        }, text: 'Save and start' }),
         el('a', { class: 'lnk', href: 'https://aistudio.google.com/apikey', target: '_blank', rel: 'noopener noreferrer', text: 'Get a free key at Google AI Studio ↗' }),
         el('p', { class: 'fine', text: 'Tip: you can use the same key you added to GitHub. In Google Cloud you can also limit the key to this website only.' })));
       return;
