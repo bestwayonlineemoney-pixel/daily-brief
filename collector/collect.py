@@ -28,6 +28,7 @@ from email.utils import parsedate_to_datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import ai  # noqa: E402
 import geo  # noqa: E402
 import trader  # noqa: E402
 
@@ -171,6 +172,36 @@ def dek(raw, title):
     return t
 
 
+IMG_EXT = re.compile(r"\.(jpe?g|png|webp|avif)(\?|$)", re.I)
+IMG_TAG = re.compile(r"""<img[^>]+src=["']([^"']+)["']""", re.I)
+
+
+def _img_of(el, raw_html):
+    """The picture the outlet itself attaches to the item in its feed (media:content / media:thumbnail / enclosure / first <img>)."""
+    best, bw = None, -1
+    for c in el.iter():
+        ct = c.tag.rsplit("}", 1)[-1].lower()
+        url = c.get("url") or c.get("href")
+        if ct in ("content", "thumbnail", "enclosure", "link") and url and url.startswith("http"):
+            typ, med = (c.get("type") or ""), (c.get("medium") or "")
+            if ct == "link" and c.get("rel") != "enclosure":
+                continue
+            if not (typ.startswith("image") or med == "image" or ct == "thumbnail" or IMG_EXT.search(url)):
+                continue
+            try:
+                w = int(c.get("width") or 0)
+            except ValueError:
+                w = 0
+            w = w or (600 if ct == "content" else 300 if ct == "thumbnail" else 500)
+            if w > bw:
+                best, bw = url, w
+    if not best and raw_html:
+        m = IMG_TAG.search(raw_html)
+        if m and m.group(1).startswith("http") and not re.search(r"pixel|tracking|feedburner|1x1|gravatar|emoji", m.group(1), re.I):
+            best = m.group(1)
+    return html.unescape(best)[:500] if best else None
+
+
 def parse_feed(body):
     body = re.sub(rb"^\s+", b"", body)
     root = ET.fromstring(body)
@@ -197,6 +228,9 @@ def parse_feed(body):
             elif ct == "guid" and "link" not in d and (c.text or "").strip().startswith("http") and c.get("isPermaLink") != "false":
                 d["link"] = c.text.strip()
         if d.get("title") and str(d.get("link", "")).startswith(("http://", "https://")) and len(d["title"]) > 12:
+            im = _img_of(el, (d.get("desc") or "") + " " + (d.get("enc") or ""))
+            if im:
+                d["img"] = im
             d["desc"] = dek(d.get("desc") or d.pop("enc", ""), d["title"])
             d.pop("enc", None)
             out.append(d)
@@ -349,7 +383,10 @@ def yahoo(item):
             closes = [x for x in r["indicators"]["quote"][0]["close"] if x is not None]
             price = r["meta"].get("regularMarketPrice") or closes[-1]
             prev = closes[-2] if len(closes) > 1 else None
-            return {"k": key, "name": name, "sym": sym, "p": price, "chg": (price / prev - 1) * 100 if prev else None, "spark": thin(closes), "src": "Yahoo Finance", "g": grp}
+            out = {"k": key, "name": name, "sym": sym, "p": price, "chg": (price / prev - 1) * 100 if prev else None, "spark": thin(closes), "src": "Yahoo Finance", "g": grp}
+            if key == "tnx" and prev:
+                out["bp"] = round((price - prev) * 100, 1)          # yields move in basis points (0.01%)
+            return out
         except Exception:  # noqa
             continue
     return {"k": key, "name": name, "sym": sym, "p": None, "err": True, "g": grp}
@@ -599,8 +636,7 @@ def macro(now):
 
 # ---------------- the day in 60 seconds ----------------
 def ai_brief(top, conf):
-    key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
-    if not key:
+    if not ai.provider():
         return None
     lang = conf.get("summary_language") or "English"
     lines = "\n".join(f'[{s["id"]}] ({s["cat"]}, {s["status"]}, {s["n"]} outlets) {s["title"]}' for s in top[:25])
@@ -608,17 +644,12 @@ def ai_brief(top, conf):
               "reader the overall picture of the day across world, war, economy and markets, crypto, tech and anything else big. One line per story or theme, "
               "most important first, plain neutral language, no opinions, no predictions, and nothing that is not in the headlines. Every story here is already "
               f"confirmed by two or more newsrooms or an official source. Write in {lang}. Reply with JSON only: {{\"lines\":[{{\"text\":\"...\",\"ids\":[\"story id\"]}}]}}\n\n" + lines)
-    body = json.dumps({"model": conf.get("summary_model") or "claude-haiku-5-5", "max_tokens": 900, "messages": [{"role": "user", "content": prompt}]}).encode()
     try:
-        j = json.loads(get("https://api.anthropic.com/v1/messages", timeout=60, data=body,
-                           headers={"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json", "Accept-Encoding": "identity"}))
-        txt = "".join(b.get("text", "") for b in j.get("content", []))
-        m = re.search(r"\{.*\}", txt, re.S)
-        got = json.loads(m.group(0))["lines"] if m else []
-        got = [{"text": str(x["text"])[:300], "ids": [str(i) for i in (x.get("ids") or [])][:3]} for x in got if x.get("text")][:8]
-        return {"by": "ai", "lines": got} if got else None
+        j, label = ai.ask_json(prompt, 1200)
+        got = [{"text": str(x["text"])[:300], "ids": [str(i) for i in (x.get("ids") or [])][:3]} for x in j.get("lines", []) if x.get("text")][:8]
+        return {"by": "ai", "model": label, "lines": got} if got else None
     except Exception as e:  # noqa
-        print("  AI summary skipped:", str(e)[:140])
+        print("  AI summary skipped:", str(e)[:240])
         return None
 
 
@@ -694,6 +725,7 @@ def run(verbose=True):
 
     mk, fng = markets()
     mac = macro(now)
+    ai.setup(get, read, write, STATE, conf)
     trader.setup(get, get_json, read, write, STATE, ARCH)
     try:
         tr = trader.run(day, final, mk, fng, mac.get("calendar"), conf.get("watchlist_default", []), now)
@@ -710,7 +742,7 @@ def run(verbose=True):
     top_s = [s for s in final if s["id"] in top]
     top_s.sort(key=lambda s: top.index(s["id"]))
     brief = None
-    if os.environ.get("ANTHROPIC_API_KEY"):
+    if ai.provider():
         if pb.get("by") == "ai" and now - pb.get("at", 0) < 45 * 60 and set(pb.get("top", [])) & set(top[:5]) == set(top[:5]):
             brief = pb
         else:
@@ -751,7 +783,7 @@ def run(verbose=True):
 
     mok = sum(1 for r in mac.get("rows", []) if not r.get("err"))
     msg = (f"{len(day)} stories today from {out['outlets']} outlets · {ok}/{len(feeds)} sources OK · macro {mok}/{len(MACRO)}"
-           f"{' · calendar ' + str(len(mac['calendar'])) if mac.get('calendar') else ''} · summary: {brief['by']}")
+           f"{' · calendar ' + str(len(mac['calendar'])) if mac.get('calendar') else ''} · summary: {brief['by']}{' (' + brief['model'] + ')' if brief.get('model') else ''}" + (f" · AI: {ai.provider()}" if ai.provider() else ""))
     if verbose:
         print(time.strftime("%H:%M:%S"), msg, flush=True)
         bad = [n for n, h in health.items() if not h["ok"]]
