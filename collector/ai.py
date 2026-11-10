@@ -29,7 +29,8 @@ def _err_msg(e):
         j = json.loads(e.read().decode("utf-8", "replace"))
         er = j.get("error") or {}
         reason = next((d.get("reason") for d in er.get("details", []) if d.get("reason")), "")
-        return (reason + " " + str(er.get("message", ""))).strip()[:160]
+        quota = ",".join(v.get("quotaId", "") for d in er.get("details", []) for v in (d.get("violations") or []) if v.get("quotaId"))
+        return (reason + " " + (("[" + quota + "] ") if quota else "") + str(er.get("message", ""))).strip()[:220]
     except Exception:  # noqa
         return ""
 
@@ -129,7 +130,11 @@ def _gemini(prompt, max_tokens):
                     if "API_KEY" in msg or "API key" in msg or e.code in (401, 403):
                         raise RuntimeError(f"Gemini key refused (HTTP {e.code} {msg}) - check the GEMINI_API_KEY secret")
                     if e.code == 429:              # rest this model: a day for a daily limit, 20 minutes otherwise
-                        cool[model] = now + (6 * 3600 if re.search(r"per ?day|PerDay|daily", msg, re.I) else 20 * 60)
+                        if re.search(r"per ?day|PerDay|daily", msg, re.I):     # daily free quota: rest until it resets (midnight Pacific, about 08:00 UTC)
+                            reset = (now // 86400) * 86400 + 8 * 3600
+                            cool[model] = reset + 86400 if reset <= now else reset
+                        else:
+                            cool[model] = now + 20 * 60
                         break
                     if e.code == 404:
                         cool[model] = now + 7 * 86400

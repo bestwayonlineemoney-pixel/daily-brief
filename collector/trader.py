@@ -21,8 +21,8 @@ from datetime import datetime, timedelta, timezone
 NET = {}
 
 
-def setup(get, get_json, read, write, state, arch=None):
-    NET.update(get=get, get_json=get_json, read=read, write=write, state=state, arch=arch)
+def setup(get, get_json, read, write, state, arch=None, lang=None):
+    NET.update(get=get, get_json=get_json, read=read, write=write, state=state, arch=arch, lang=lang)
 
 
 def _get(url, **kw):
@@ -829,7 +829,7 @@ def ai_impact(stories, mk, out, now):
     prev = NET["read"](NET["state"] / "ai_impact.json", {})
     drv = out.get("drivers") or []
     age = now - prev.get("at", 0)
-    if prev.get("assets") and (age < 2 * 3600 and (prev.get("drivers") == drv or age < 3600)):
+    if prev.get("assets") and (age < 100 * 60 and (prev.get("drivers") == drv or age < 50 * 60)):
         return prev
     m = {x["k"]: x for x in mk if x.get("p") is not None}
     L = sorted(stories, key=lambda s: (-s.get("impact", 1), -s["score"]))[:90]
@@ -839,6 +839,12 @@ def ai_impact(stories, mk, out, now):
           for k in ("btc", "eth", "sol", "gold", "oil", "spx", "ndx", "dxy", "tnx", "vix", "eur", "jpy") if k in m}
     ev = [{"event": e["where"] + " " + e["title"], "hours_from_now": round((e["t"] - now) / 3600, 1), "forecast": e["f"], "previous": e["p"]}
           for e in (out.get("cal") or []) if now - 3 * 3600 <= e["t"] <= now + 36 * 3600][:8]
+    der = {k: {"signal": v.get("signal"), "funding_8h_pct": v.get("funding"), "long_short": v.get("ls"), "oi_24h_pct": v.get("oi_chg")}
+           for k, v in (out.get("derivatives") or {}).items() if isinstance(v, dict) and not v.get("err")}
+    liq = {k: {"longs_usd": v.get("long"), "shorts_usd": v.get("short")} for k, v in (out.get("liqs") or {}).items() if isinstance(v, dict) and not v.get("err")}
+    lv = {k: {kk: v["lv"].get(kk) for kk in ("hi24", "lo24", "vwap", "pdh", "pdl")} | {"last": v["pts"][-1][1]} for k, v in (out.get("catalysts") or {}).items() if v.get("lv")}
+    br = {k: (out.get("breadth") or {}).get(k) for k in ("up", "n", "dom_btc", "mcap_chg")} if out.get("breadth") else None
+    lang = NET.get("lang") or "English"
     prompt = ("You are the market analyst of a personal trading dashboard. Read ALL of today's confirmed news below (each item is confirmed by 2+ newsrooms "
               "or an official source) together with the market numbers, and explain the POSSIBLE impact on markets. Think across all news: wars, politics, "
               "central banks, data, energy, crypto, tech. Rules: plain simple English, neutral, factual, no advice, no buy/sell calls, describe what the news "
@@ -847,12 +853,20 @@ def ai_impact(stories, mk, out, now):
               '"mood":"RISK-ON|RISK-OFF|MIXED",'
               '"assets":[{"k":"BTC|ETH|GOLD|OIL|SPX|USD|BONDS","dir":"UP|DOWN|MIXED","strength":1,"why":"max 22 words","ids":["story id"]}],'
               '"themes":[{"name":"2-4 words","impact":"max 26 words on what it means for markets","ids":["story id"]}],'
-              '"watch":["max 18 words: a risk or event to watch next"]}\n'
-              "assets: all 7 keys, strength 1 (slight) to 3 (strong). themes: the 3 biggest. watch: 2 or 3 items.\n\n"
+              '"watch":["max 18 words: a risk or event to watch next"],'
+              '"lines":[{"text":"max 25 words","ids":["story id"]}],'
+              '"bullets":[{"k":"mood|event|positioning|levels|news|breadth","text":"max 24 words"}]}\n'
+              "assets: all 7 keys, strength 1 (slight) to 3 (strong). themes: the 3 biggest. watch: 2 or 3 items.\n"
+              f"lines = 'The day in 60 seconds' for a busy reader, written in {lang}: 6 to 8 lines covering the whole day across world, war, economy, "
+              "markets, crypto, tech and anything else big, most important first, plain neutral language, one story or theme per line.\n"
+              "bullets = the trader's brief: 4 or 5 bullets on market mood, event risk, positioning and leverage (from DERIVATIVES and LIQUIDATIONS), "
+              "key price levels (from LEVELS, round sensibly) and breadth; never mention clock times (the page shows them).\n\n"
               "MARKET NUMBERS: " + json.dumps(px) + "\nUPCOMING HIGH-IMPACT EVENTS: " + json.dumps(ev) +
+              "\nDERIVATIVES: " + json.dumps(der, default=str) + "\nLIQUIDATIONS 24H (OKX): " + json.dumps(liq) + "\nLEVELS (15-min data): " + json.dumps(lv, default=str) +
+              "\nCRYPTO BREADTH: " + json.dumps(br) +
               "\nREGIME (from prices): " + str((out.get("regime") or {}).get("label")) + "\n\nTODAY'S CONFIRMED NEWS:\n" + lines)
     try:
-        j, label = ai.ask_json(prompt, 2200)
+        j, label = ai.ask_json(prompt, 4000)
         ids = {s["id"] for s in stories}
         assets = []
         for a in j.get("assets", []):
@@ -864,7 +878,9 @@ def ai_impact(stories, mk, out, now):
             res = {"headline": str(j.get("headline", ""))[:260], "mood": str(j.get("mood", "MIXED")).upper()[:10], "assets": assets,
                    "themes": [{"name": str(t.get("name", ""))[:40], "impact": str(t.get("impact", ""))[:240], "ids": [i for i in (t.get("ids") or []) if i in ids][:4]}
                               for t in j.get("themes", [])[:3] if t.get("name")],
-                   "watch": [str(w)[:160] for w in j.get("watch", [])[:3]], "n": len(L), "at": int(now), "by": label, "drivers": drv}
+                   "watch": [str(w)[:160] for w in j.get("watch", [])[:3]], "n": len(L), "at": int(now), "by": label, "drivers": drv,
+                   "lines": [{"text": str(x.get("text", ""))[:300], "ids": [i for i in (x.get("ids") or []) if i in ids][:3]} for x in j.get("lines", []) if x.get("text")][:8],
+                   "bullets": [{"k": str(b.get("k", "news"))[:12], "text": str(b.get("text", ""))[:240]} for b in j.get("bullets", []) if b.get("text")][:5]}
             NET["write"](NET["state"] / "ai_impact.json", res)
             return res
     except Exception as e:  # noqa
@@ -963,8 +979,9 @@ def run(day_stories, final_stories, mk, fng, calendar, watch, now):
     out = {"regime": regime(mk, fng), "drivers": drivers(final_stories, now), "narratives": narratives(final_stories, now), "catalysts": cat, "sparks": sparks,
            "derivatives": der, "liqs": liq, "events": events(final_stories, calendar, now), "cal": safe("calendar", lambda: econ_calendar(now), []),
            "breadth": safe("breadth", breadth), "ai_tags": ai}
-    out["ai_brief"] = safe("AI trader brief", lambda: ai_trader_brief(out, mk, final_stories, now))
-    out["impact"] = safe("AI impact", lambda: ai_impact(final_stories, mk, out, now))
+    out["impact"] = safe("AI impact", lambda: ai_impact(final_stories, mk, out, now))      # one AI call: impact + day in 60 seconds + trader's brief
+    imp_ = out["impact"] or {}
+    out["ai_brief"] = {"bullets": imp_["bullets"], "at": imp_["at"], "by": imp_.get("by")} if imp_.get("bullets") else None
     out["alerts_sent"] = alerts(final_stories, watch, prices.get("BTC"), now)
     if NET.get("arch"):
         out["logged"] = keylog(final_stories, out["drivers"], mk, now)

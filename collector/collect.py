@@ -741,7 +741,7 @@ def run(verbose=True):
     mk, fng = markets()
     mac = macro(now)
     ai.setup(get, read, write, STATE, conf)
-    trader.setup(get, get_json, read, write, STATE, ARCH)
+    trader.setup(get, get_json, read, write, STATE, ARCH, conf.get("summary_language") or "English")
     try:
         tr = trader.run(day, final, mk, fng, mac.get("calendar"), conf.get("watchlist_default", []), now)
     except Exception as e:  # noqa  - the trader layer must never stop the news
@@ -757,11 +757,11 @@ def run(verbose=True):
     top_s = [s for s in final if s["id"] in top]
     top_s.sort(key=lambda s: top.index(s["id"]))
     brief = None
-    if ai.provider():
-        if pb.get("by") == "ai" and now - pb.get("at", 0) < 45 * 60 and set(pb.get("top", [])) & set(top[:5]) == set(top[:5]):
-            brief = pb
-        else:
-            brief = ai_brief(top_s + [s for s in day if s["id"] not in top][:13], conf)
+    imp_ = (tr or {}).get("impact") or {}
+    if imp_.get("lines"):                 # written in the same AI call as the impact read (saves the free Gemini quota)
+        brief = {"by": "ai", "model": imp_.get("by"), "lines": imp_["lines"], "at": imp_.get("at", int(now))}
+    elif ai.provider() and pb.get("by") == "ai" and now - pb.get("at", 0) < 3 * 3600:
+        brief = pb
     brief = brief or auto_brief(day)
     brief.setdefault("at", int(now))
     brief["top"] = top[:5]
