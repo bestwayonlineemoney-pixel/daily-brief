@@ -97,8 +97,8 @@ def _gemini(prompt, max_tokens):
         for model in models:
             for think in (True, False):           # 2.5 models accept a zero thinking budget (cheaper, faster); newer ones may not
                 gap = time.time() - st.get("last", 0)
-                if gap < 9:
-                    time.sleep(9 - gap)               # stay under the per-minute limit
+                if gap < 13:
+                    time.sleep(13 - gap)              # stay under the free tier's per-minute limit
                 old_gen = "gemini-2.5" in model
                 gen = {"maxOutputTokens": max_tokens if old_gen else max_tokens + 6000, "temperature": 0.3, "responseMimeType": "application/json"}
                 if think:                          # keep the model's hidden "thinking" short so the answer is not cut off
@@ -146,7 +146,7 @@ def _gemini(prompt, max_tokens):
                     last = f"{model}: {str(e)[:80]}"
                     tried.append(f"{model}=err")
                     break
-            if len(tried) >= 4:
+            if len(tried) >= 4 or sum(1 for t in tried if t.endswith("=429")) >= 2:
                 break
     finally:
         save()
