@@ -780,7 +780,7 @@ def run(verbose=True):
            "stories": final, "top": top, "counts": {k: len(by[k]) for k in CATS}, "total": len(day), "unconfirmed_hidden": unconfirmed if conf.get("verified_only", True) else 0,
            "rule": "Shown only when 2+ independent newsrooms report it, or it comes from an official source",
            "outlets": len({o for s in day for o in s["orgs"]}), "reports": sum(len(s["reports"]) for s in day),
-           "brief": brief, "markets": mk, "fng": fng, "macro": mac.get("rows", []), "calendar": mac.get("calendar"), "trader": tr, "spotlight": spot, "pulse": {"start": h0, "cats": pulse},
+           "brief": brief, "markets": mk, "fng": fng, "macro": mac.get("rows", []), "calendar": mac.get("calendar"), "trader": tr, "spotlight": spot, "ai_model": (read(STATE / "ai_model.json", {}) or {}).get("gemini"), "pulse": {"start": h0, "cats": pulse},
            "feeds": {"ok": ok, "total": len(feeds), "list": health}}
     write(DATA / "today.json", out)
 

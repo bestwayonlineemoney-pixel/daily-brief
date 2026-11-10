@@ -924,19 +924,19 @@
   }
   function hlCard(s, i) {
     const a = act(el('article', { class: 'hl glass spot' + (i === 0 ? ' first' : ''), style: { '--c': cv(s.cat) } }), s.id);
-    const ph = photo(s.img, () => artBox(s), s.title);
+    const ph = s.img ? photo(s.img, () => artBox(s), s.title) : el('div', { class: 'ph drawn' }, artBox(s));
     ph.append(el('span', { class: 'hl-cat' }, el('i'), SHORT[s.cat] || s.cat), isNum(s.impact) ? el('span', { class: 'hl-imp ' + (s.impact >= 8 ? 'hi' : s.impact >= 5 ? 'mid' : ''), text: '⚡ ' + s.impact }) : null,
       s.breaking && !DAY ? el('span', { class: 'hl-brk', text: 'Breaking' }) : null);
     a.append(ph, el('div', { class: 'hl-b' }, el('h3', { text: s.title }), sigRow(s),
       el('div', { class: 'hl-m' }, s.status === 'OFFICIAL' ? el('span', { class: 'ok', text: '◆ Official source' }) : el('span', { class: 'ok', text: '✓ ' + s.n + ' newsrooms' }), el('span', { text: ago(s.last) })),
-      el('div', { class: 'hl-cr', text: 'Photo: ' + (s.img_o || (s.orgs || [])[0] || '') })));
+      s.img ? el('div', { class: 'hl-cr', text: 'Photo: ' + (s.img_o || (s.orgs || [])[0] || '') }) : null));
     return a;
   }
-  function headlinesSection() {
-    const L = D.stories.filter((s) => s.img && quality(s)).sort((a, b) => ((b.impact || 0) - (a.impact || 0)) || (imp(b) - imp(a))).slice(0, 12);
+  function headlinesSection(lead) {
+    const L = D.stories.filter((s) => quality(s) && s !== lead).sort((a, b) => ((b.impact || 0) - (a.impact || 0)) || ((b.img ? 1 : 0) - (a.img ? 1 : 0)) || (imp(b) - imp(a))).slice(0, 14);
     if (L.length < 3) return null;
     const [row, navs] = strip(L.map(hlCard));
-    return sec('Headlines', { id: 'headlines', cls: 'hlsec', eyebrow: 'In pictures', sub: 'The most important confirmed stories right now. Swipe for more', more: navs }, row);
+    return sec('Headlines', { id: 'headlines', cls: 'hlsec', eyebrow: 'The day in pictures', sub: 'The most important confirmed stories right now, by impact. Swipe for more', more: navs }, row);
   }
   function spotCard(x, src) {
     const st = x.sid && BYID[x.sid];
@@ -955,50 +955,259 @@
     });
   }
 
+  /* ================= the top of the page: regime, the lead story, the day in 60 seconds ================= */
+  function regimeBar() {
+    const R = TR().regime; if (!R || DAY) return null;
+    const k = R.label === 'RISK-ON' ? 'on' : R.label === 'RISK-OFF' ? 'off' : 'chop';
+    const pos = Math.max(0, Math.min(100, 50 + (R.score || 0) * 10));
+    const nNew = D.stories.filter(isNew).length, nUpd = D.stories.filter(isUpd).length;
+    return el('section', { class: 'rbar glass ' + k },
+      el('div', { class: 'rb-l' }, el('span', { class: 'rg-dot' }), el('span', { class: 'rb-k', text: 'Market regime' }), el('b', { class: 'rb-v', text: R.label }),
+        el('div', { class: 'rb-meter', title: 'Score ' + (R.score > 0 ? '+' : '') + R.score + ' from bitcoin, fear & greed, the dollar, the S&P 500 and the VIX' },
+          el('span', { text: 'Risk-off' }), el('div', { class: 'rb-track' }, el('i', { style: { left: pos + '%' } })), el('span', { text: 'Risk-on' }))),
+      el('div', { class: 'rb-why' }, (R.why || []).map(([s, t]) => el('span', { class: s === '+' ? 'u' : 'd', text: (s === '+' ? '▲ ' : '▼ ') + t }))),
+      el('div', { class: 'rb-r' }, el('b', { text: greet() }), el('span', { text: new Date().toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' }) + (D.updated ? ' · updated ' + ago(D.updated) : '') }),
+        sinceMode() && (nNew || nUpd) ? el('button', { class: 'lnk rb-away', onclick: () => { const a = $('away'); if (a) a.scrollIntoView({ behavior: 'smooth' }); }, text: nNew + ' new · ' + nUpd + ' updated since ' + hm(since) + ' ↓' }) : null));
+  }
+  function leadStory() {
+    const drv = (TR().drivers || []).map((id) => BYID[id]).filter(Boolean);
+    const cand = [...new Set(drv.concat(D.top.map((id) => BYID[id]).filter(Boolean)))].filter(quality);
+    const first = cand[0] || null; if (!first || first.img) return first;
+    return cand.find((s) => s.img && (s.impact || 0) >= (first.impact || 0)) || first;
+  }
+  function leadCard(s) {
+    const ph = s.img ? photo(s.img, () => artBox(s, true), s.title) : el('div', { class: 'ph' }, artBox(s, true));
+    ph.append(el('div', { class: 'ld-tags' }, el('span', { class: 'ld-top' }, '★ Top story'), el('span', { class: 'hl-cat' }, el('i'), SHORT[s.cat] || s.cat),
+      s.breaking && !DAY ? el('span', { class: 'hl-brk static', text: 'Breaking' }) : null, isNum(s.impact) ? el('span', { class: 'hl-imp ' + (s.impact >= 8 ? 'hi' : s.impact >= 5 ? 'mid' : ''), text: '⚡ ' + s.impact + '/10' }) : null),
+      el('div', { class: 'ld-over' }, el('h2', { text: s.title }), s.dek ? el('p', { text: s.dek }) : null));
+    return rv(act(el('article', { class: 'lead glass spot', style: { '--c': cv(s.cat) } }, ph,
+      el('div', { class: 'ld-b' }, el('div', { class: 'ld-row' }, sigRow(s), badge(s), el('span', { class: 'tm', text: ago(s.last) }), s.img ? el('span', { class: 'hl-cr', text: 'Photo: ' + (s.img_o || s.orgs[0] || '') }) : null),
+        s.why ? el('div', { class: 'ld-why' }, el('b', { text: 'Why it matters' }), ' ' + s.why) : null, srcLine(s))), s.id), 1);
+  }
+  function leadSide(lead) {
+    const others = (TR().drivers || []).map((id) => BYID[id]).filter((s) => s && s !== lead).slice(0, 2);
+    const B = D.brief || {}, lines = (B.lines || []).filter((x) => x.text).slice(0, 5);
+    return rv(el('aside', { class: 'lside glass' },
+      others.length ? [el('div', { class: 'eyebrow', text: 'Also driving markets' }), others.map((s, i) => act(el('div', { class: 'ls-d', style: { '--c': cv(s.cat) } }, el('span', { class: 'drv-n', text: i + 2 }),
+        el('div', null, el('div', { class: 'ls-t', text: s.title }), sigRow(s))), s.id))] : null,
+      lines.length ? [el('div', { class: 'ls-h' }, el('div', { class: 'eyebrow', text: 'The day in 60 seconds' }), B.by === 'ai' ? el('span', { class: 'ai-tag', title: B.model || 'AI', text: 'AI' }) : null),
+        el('ul', { class: 'ls-60' }, lines.map((x) => { const id = (x.ids || []).find((i) => BYID[i]); return el('li', id ? { class: 'go', onclick: () => openStory(id) } : null, x.text); }))] : null,
+      el('div', { class: 'ls-cta' }, el('button', { class: 'btn grad-btn', onclick: () => openBrief() }, el('span', { class: 'play' }, '▶'), '5-minute brief'),
+        el('button', { class: 'btn ghost ask-mini', onclick: () => chatOpen() }, el('span', { class: 'ai-orb sm' }), 'Ask Brief AI'))), 2);
+  }
+
+  /* ================= possible market impact: AI reads all of today's news ================= */
+  const IMP_NAME = { BTC: 'Bitcoin', ETH: 'Ether', GOLD: 'Gold', OIL: 'Oil', SPX: 'S&P 500', USD: 'US dollar', BONDS: 'Bonds' };
+  const citeChip = (id) => { const s = BYID[id]; return s ? el('button', { class: 'cite', title: s.title, onclick: (e) => { e.stopPropagation(); openStory(id); } }, s.title.length > 46 ? s.title.slice(0, 44) + '…' : s.title) : null; };
+  function impactSection() {
+    const I = TR().impact; if (!I || DAY || !(I.assets || []).length) return null;
+    const mk = I.mood === 'RISK-ON' ? 'on' : I.mood === 'RISK-OFF' ? 'off' : 'chop';
+    const tile = (a) => { const k = a.dir === 'UP' ? 'u' : a.dir === 'DOWN' ? 'd' : 'm';
+      return el('div', { class: 'ia ' + k }, el('div', { class: 'ia-h' }, el('b', { text: IMP_NAME[a.k] || a.k }),
+        el('span', { class: 'ia-dir' }, el('i', { text: a.dir === 'UP' ? '▲' : a.dir === 'DOWN' ? '▼' : '◆' }), a.dir === 'UP' ? 'Up' : a.dir === 'DOWN' ? 'Down' : 'Mixed'),
+        el('span', { class: 'ia-s', title: ['', 'Slight', 'Moderate', 'Strong'][a.s] + ' pressure' }, [1, 2, 3].map((n) => el('u', { class: n <= a.s ? 'on' : '' })))),
+      el('p', { text: a.why }), (a.ids || []).length ? el('div', { class: 'ia-c' }, a.ids.slice(0, 2).map(citeChip)) : null); };
+    return sec('Possible market impact', { id: 'impact', eyebrow: 'AI reads all of today\'s news', sub: 'What today\'s confirmed news could mean for each market. A reading, not a prediction or advice' },
+      el('div', { class: 'imp glass' },
+        el('div', { class: 'imp-top' }, el('span', { class: 'imp-mood ' + mk, text: I.mood }), el('p', { class: 'imp-hl', text: I.headline }),
+          el('span', { class: 'fine', text: 'By ' + (I.by || 'AI') + ' · read ' + (I.n || '') + ' stories · ' + ago(I.at) })),
+        el('div', { class: 'ias' }, I.assets.map(tile)),
+        el('div', { class: 'imp-b' },
+          (I.themes || []).length ? el('div', null, el('div', { class: 'eyebrow', text: 'The big themes' }), I.themes.map((t) => el('div', { class: 'it' }, el('b', { text: t.name }), el('p', { text: t.impact }),
+            (t.ids || []).length ? el('div', { class: 'ia-c' }, t.ids.slice(0, 2).map(citeChip)) : null))) : null,
+          (I.watch || []).length ? el('div', null, el('div', { class: 'eyebrow', text: 'Watch next' }), el('ul', { class: 'iw' }, I.watch.map((w) => el('li', { text: w }))),
+            el('button', { class: 'btn ghost sm', style: { marginTop: '12px' }, onclick: () => chatOpen('Explain today\'s possible market impact in more detail. What could change the picture?') }, el('span', { class: 'ai-orb sm' }), 'Ask more')) : null)));
+  }
+
+  /* ================= Brief AI: chat with Gemini about today's news and markets =================
+     The key is kept only in this browser (localStorage) and sent only to Google. Answers are grounded in the data on this page. */
+  const CHAT = { msgs: (() => { try { return JSON.parse(sessionStorage.getItem('db.chat') || '[]'); } catch (e) { return []; } })(), busy: false, built: false, abort: null };
+  const aiKey = () => S.get('gemkey', '');
+  const saveChat = () => { try { sessionStorage.setItem('db.chat', JSON.stringify(CHAT.msgs.slice(-30))); } catch (e) { /* */ } };
+  function mdLite(text) {
+    const inline = (t) => esc(t).replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>').replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<i>$2</i>').replace(/`([^`]+)`/g, '<code>$1</code>')
+      .replace(/\[s:([0-9a-f]{6,12})\]/g, (m0, id) => { const s = BYID[id]; return s ? `<button class="cite" data-sid="${id}" title="${esc(s.title)}">${esc(s.title.length > 42 ? s.title.slice(0, 40) + '…' : s.title)}</button>` : ''; });
+    let out = '', list = null;
+    const close = () => { if (list) { out += '</' + list + '>'; list = null; } };
+    String(text).split('\n').forEach((raw) => { const l = raw.trim();
+      if (!l) { close(); return; }
+      let m;
+      if ((m = l.match(/^#{1,4}\s+(.*)/))) { close(); out += '<h4>' + inline(m[1]) + '</h4>'; }
+      else if ((m = l.match(/^[-*•]\s+(.*)/))) { if (list !== 'ul') { close(); out += '<ul>'; list = 'ul'; } out += '<li>' + inline(m[1]) + '</li>'; }
+      else if ((m = l.match(/^\d+[.)]\s+(.*)/))) { if (list !== 'ol') { close(); out += '<ol>'; list = 'ol'; } out += '<li>' + inline(m[1]) + '</li>'; }
+      else { close(); out += '<p>' + inline(l) + '</p>'; } });
+    close(); return out;
+  }
+  function chatContext() {
+    const T = TR(), n = now(), L = [...D.stories].filter(quality).sort((a, b) => ((b.impact || 0) - (a.impact || 0)) || (imp(b) - imp(a))).slice(0, 60);
+    const fx = (v) => isNum(v) ? (Math.abs(v) >= 100 ? Math.round(v).toLocaleString('en-US') : +v.toFixed(4)) : '-';
+    const px = ['btc', 'eth', 'sol', 'xrp', 'gold', 'silver', 'oil', 'wti', 'gas', 'spx', 'ndx', 'dji', 'vix', 'dxy', 'tnx', 'eur', 'gbp', 'jpy', 'lkr'].map((k) => MK[k]).filter((m) => m && isNum(m.p))
+      .map((m) => { const live = { btc: 'BTC', eth: 'ETH', sol: 'SOL' }[m.k], p = live && LIVEPX[live] ? LIVEPX[live] : m.p; return `${m.name}: ${fx(p)}${m.k === 'tnx' ? '%' : ''} (${isNum(m.chg) ? (m.chg >= 0 ? '+' : '') + m.chg.toFixed(2) + '% 24h' : ''})`; });
+    const X = T.derivatives || {}, Q = T.liqs || {};
+    const der = ['BTC', 'ETH', 'SOL'].filter((k) => X[k] && !X[k].err).map((k) => { const d = X[k], q = Q[k] || {}, f = d.flow;
+      return `${k}: signal "${d.signal}", funding ${fx(d.funding)}%/8h, long/short ${fx(d.ls)}, OI ${d.oi_usd ? fmtUsd(d.oi_usd) : '-'} (${isNum(d.oi_chg) ? d.oi_chg.toFixed(1) + '% 24h' : '-'})` +
+        (f ? `, taker buys ${Math.round(f.buy / (f.buy + f.sell) * 100)}% of 24h volume` : '') + (q.long != null ? `, liquidations 24h longs ${fmtUsd(q.long)} shorts ${fmtUsd(q.short)} (OKX)` : ''); });
+    const lv = Object.entries(T.catalysts || {}).map(([k, v]) => v.lv ? `${k}: last ${fx(v.pts[v.pts.length - 1][1])}, 24h high ${fx(v.lv.hi24)}, low ${fx(v.lv.lo24)}, VWAP ${fx(v.lv.vwap)}, prev high ${fx(v.lv.pdh)}, prev low ${fx(v.lv.pdl)}` : null).filter(Boolean);
+    const cal = calGroups().filter((g) => g.t > n - 3 * 3600).slice(0, 8).map((g) => `${g.where} ${g.name} at ${whenTxt(g.t)} (${g.t > n ? 'in ' + cdShort(g.t - n) : 'released'})${g.lead.f ? ', forecast ' + g.lead.f : ''}${g.lead.p ? ', previous ' + g.lead.p : ''}`);
+    const R = T.regime, I = T.impact, B = T.breadth;
+    const st = L.map((s) => `[s:${s.id}] (${SHORT[s.cat] || s.cat}; ${s.status === 'OFFICIAL' ? 'official source' : s.n + ' newsrooms'}; impact ${s.impact || '?'}/10; ${(s.sentiment || 'neutral').toLowerCase()}; first ${hm(s.first)}, latest ${hm(s.last)}) ${s.title}${s.dek ? ' — ' + s.dek.slice(0, 160) : ''}${s.why ? ' | why: ' + s.why : ''}`);
+    const mac = (D.macro || []).filter((x) => isNum(x.v)).map((x) => `${x.region} ${x.name}: ${mval(x)} (${mdate(x.date)}, ${x.src})`);
+    const spot = Object.entries(D.spotlight || {}).map(([nm, l]) => nm + ' (single source, not confirmed): ' + l.slice(0, 8).map((x) => x.t).join(' | '));
+    return [`NOW: ${new Date().toLocaleString([], { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })} (user's local time)`,
+      R ? `MARKET REGIME: ${R.label} (score ${R.score}); reasons: ${(R.why || []).map((w) => w[1]).join('; ')}` : '',
+      'PRICES: ' + px.join(' · '), D.fng ? `CRYPTO FEAR & GREED: ${D.fng.v} (${D.fng.label})` : '',
+      der.length ? 'DERIVATIVES:\n' + der.join('\n') : '', lv.length ? 'KEY LEVELS (15-min data):\n' + lv.join('\n') : '',
+      B ? `CRYPTO BREADTH: ${B.up} of ${B.n} top coins up; BTC dominance ${B.dom_btc}%; total crypto value ${fmtUsd(B.mcap)} (${B.mcap_chg}% 24h); top gainers ${B.gainers.slice(0, 3).map((x) => x.sym + ' ' + x.chg + '%').join(', ')}; top losers ${B.losers.slice(0, 3).map((x) => x.sym + ' ' + x.chg + '%').join(', ')}` : '',
+      cal.length ? 'HIGH-IMPACT ECONOMIC EVENTS:\n' + cal.join('\n') : '',
+      I ? `AI MARKET IMPACT READ: ${I.headline} | ${I.assets.map((a) => a.k + ' ' + a.dir + ': ' + a.why).join(' | ')} | watch: ${(I.watch || []).join('; ')}` : '',
+      mac.length ? 'OFFICIAL MACRO DATA:\n' + mac.join('\n') : '',
+      'TODAY\'S CONFIRMED NEWS (most important first):\n' + st.join('\n'), spot.join('\n')].filter(Boolean).join('\n\n');
+  }
+  const CHAT_SYS = 'You are Brief AI, the assistant inside the user\'s personal "Trading Desk Daily Brief" dashboard. ' +
+    'Answer ONLY from the DATA below: today\'s confirmed news (each story is reported by 2+ independent newsrooms or an official source) and the market numbers on the page. ' +
+    'If the answer is not in the data, say so plainly and do not guess. Be concise and clear: short paragraphs or bullets, simple words, the most important point first. ' +
+    'When you use a story, cite it right after the sentence as [s:ID] exactly as written in the data, one ID per bracket. ' +
+    'You may explain the possible impact of news on markets, but never give buy/sell advice, never promise a price direction, and add no disclaimers beyond a short "not advice" when relevant. ' +
+    'Language: reply in the language the user writes in. If the user writes Sinhala or Singlish (Sinhala in English letters), reply in simple, natural Sinhala script, keeping market terms (Bitcoin, CPI, funding, ETF) in English. ' +
+    'Times in the data are the user\'s local time.';
+  function chatBuild() {
+    if (CHAT.built) return; CHAT.built = true;
+    const wrap = el('aside', { class: 'chat', id: 'chat', 'aria-hidden': 'true' },
+      el('div', { class: 'chat-shade', onclick: chatClose }),
+      el('div', { class: 'chat-panel', role: 'dialog', 'aria-label': 'Brief AI' },
+        el('header', { class: 'chat-h' }, el('span', { class: 'ai-orb lg' }), el('div', { class: 'chat-ti' }, el('b', null, 'Brief AI'), el('span', { id: 'chatSub', text: 'Gemini · knows today\'s news and markets' })),
+          el('button', { class: 'ib sm', title: 'New chat', 'aria-label': 'New chat', onclick: () => { if (CHAT.abort) CHAT.abort.abort(); CHAT.msgs = []; saveChat(); chatRender(); }, text: '⟲' }),
+          el('button', { class: 'ib sm', title: 'Settings', 'aria-label': 'Settings', onclick: () => chatRender('settings'), text: '⚙' }),
+          el('button', { class: 'ib sm', title: 'Close', 'aria-label': 'Close', onclick: chatClose, text: '✕' })),
+        el('div', { class: 'chat-body', id: 'chatBody' }),
+        el('form', { class: 'chat-in', id: 'chatForm' }, el('textarea', { id: 'chatQ', rows: 1, placeholder: 'Ask anything about today\'s news and markets…', 'aria-label': 'Your question' }),
+          el('button', { class: 'send', type: 'submit', 'aria-label': 'Send', text: '↑' })),
+        el('div', { class: 'chat-foot', text: 'Answers come only from today\'s confirmed news and market data on this page · not financial advice' })));
+    document.body.append(wrap);
+    const q = $('chatQ');
+    q.addEventListener('input', () => { q.style.height = 'auto'; q.style.height = Math.min(140, q.scrollHeight) + 'px'; });
+    q.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('chatForm').requestSubmit(); } });
+    $('chatForm').addEventListener('submit', (e) => { e.preventDefault(); const t = q.value.trim(); if (!t || CHAT.busy) return; q.value = ''; q.style.height = 'auto'; chatSend(t); });
+    $('chatBody').addEventListener('click', (e) => { const c = e.target.closest('.cite'); if (c && c.dataset.sid) openStory(c.dataset.sid); const s = e.target.closest('.sug'); if (s) chatSend(s.dataset.q); });
+  }
+  function chatSuggestions() {
+    const nx = calGroups().find((g) => g.t > now());
+    return ['What matters most for markets today?', 'Why is Bitcoin moving today?', 'What could today\'s news do to gold and oil?',
+      nx ? `What should I watch before ${nx.where} ${nx.lead.title}?` : 'What are the biggest risks this week?', 'Explain the derivatives positioning in simple words', 'Summarize the war and geopolitics news in 5 points',
+      'අද දවසේ වැදගත්ම news සරලව කියන්න'];
+  }
+  function chatRender(mode) {
+    const body = $('chatBody'); if (!body) return; clear(body);
+    if (mode === 'settings') {
+      const k = aiKey();
+      body.append(el('div', { class: 'chat-set' }, el('h4', { text: 'Settings' }),
+        el('p', { text: k ? 'A Gemini key is saved in this browser (ending …' + k.slice(-4) + '). It is sent only to Google, never to GitHub or anywhere else.' : 'No key saved yet.' }),
+        el('p', { class: 'fine', text: 'Model: ' + (D.ai_model || 'gemini-flash-latest') + ' (the same one the collector found works with your key)' }),
+        el('div', { class: 'chat-row' }, k ? el('button', { class: 'btn', onclick: () => { S.set('gemkey', ''); chatRender(); }, text: 'Forget the key' }) : null,
+          el('button', { class: 'btn', onclick: () => { CHAT.msgs = []; saveChat(); chatRender(); }, text: 'Clear the chat' }), el('button', { class: 'btn ghost', onclick: () => chatRender(), text: 'Back' }))));
+      return;
+    }
+    if (!aiKey()) {
+      const inp = el('input', { type: 'password', placeholder: 'Paste your Gemini API key', autocomplete: 'off', spellcheck: 'false' });
+      body.append(el('div', { class: 'chat-key' }, el('span', { class: 'ai-orb xl' }), el('h3', { text: 'Connect Gemini to chat' }),
+        el('p', { text: 'Paste a Gemini API key once. It is saved only in this browser on this device and is sent only to Google. It is never put on GitHub or in the page.' }),
+        inp, el('button', { class: 'btn grad-btn', onclick: () => { const v = inp.value.trim(); if (!/^[A-Za-z0-9_\-]{20,}$/.test(v)) { toast('That does not look like a Gemini key'); return; } S.set('gemkey', v); chatRender(); setTimeout(() => $('chatQ').focus(), 50); }, text: 'Save and start' }),
+        el('a', { class: 'lnk', href: 'https://aistudio.google.com/apikey', target: '_blank', rel: 'noopener noreferrer', text: 'Get a free key at Google AI Studio ↗' }),
+        el('p', { class: 'fine', text: 'Tip: you can use the same key you added to GitHub. In Google Cloud you can also limit the key to this website only.' })));
+      return;
+    }
+    if (!CHAT.msgs.length) {
+      body.append(el('div', { class: 'chat-hi' }, el('span', { class: 'ai-orb xl' }), el('h3', { text: greet() + '. What do you want to know?' }),
+        el('p', { text: 'I read today\'s ' + D.stories.length + ' confirmed stories, the prices, derivatives, the calendar and the AI impact read. Ask in English or Sinhala.' }),
+        el('div', { class: 'sugs' }, chatSuggestions().map((t) => el('button', { class: 'sug', 'data-q': t, text: t })))));
+      return;
+    }
+    CHAT.msgs.forEach((m) => body.append(chatBubble(m)));
+    body.scrollTop = body.scrollHeight;
+  }
+  function chatBubble(m) {
+    if (m.role === 'user') return el('div', { class: 'msg you' }, el('div', { class: 'bub', text: m.text }));
+    const b = el('div', { class: 'bub' + (m.err ? ' err' : '') }); b.innerHTML = m.text ? mdLite(m.text) : '<span class="typing"><i></i><i></i><i></i></span>';
+    return el('div', { class: 'msg bot' }, el('span', { class: 'ai-orb sm' }), b);
+  }
+  async function chatSend(text) {
+    if (CHAT.busy) return; const key = aiKey(); if (!key) { chatRender(); return; }
+    CHAT.msgs.push({ role: 'user', text }); const ans = { role: 'model', text: '' }; CHAT.msgs.push(ans); chatRender();
+    const body = $('chatBody'), bubble = body.lastChild.querySelector('.bub'); CHAT.busy = true; $('chatForm').classList.add('busy');
+    const hist = CHAT.msgs.slice(0, -1).filter((m) => !m.err).slice(-12).map((m) => ({ role: m.role === 'user' ? 'user' : 'model', parts: [{ text: m.text }] }));
+    const sys = CHAT_SYS + '\n\nDATA:\n' + chatContext();
+    const models = [...new Set([D.ai_model, 'gemini-flash-latest', 'gemini-2.5-flash'].filter(Boolean))];
+    let done = false, errMsg = '';
+    for (const model of models) {
+      for (const think of [true, false]) {
+        const gen = { temperature: 0.4, maxOutputTokens: 8192 };
+        if (think) gen.thinkingConfig = /2\.5/.test(model) ? { thinkingBudget: 0 } : { thinkingLevel: 'low' };
+        CHAT.abort = new AbortController();
+        try {
+          const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse`, { method: 'POST', signal: CHAT.abort.signal,
+            headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key }, body: JSON.stringify({ systemInstruction: { parts: [{ text: sys }] }, contents: hist, generationConfig: gen }) });
+          if (!r.ok) {
+            let msg = ''; try { const j = await r.json(); msg = (j.error && j.error.message) || ''; } catch (e) { /* */ }
+            if (/API key|API_KEY/i.test(msg) || r.status === 401 || r.status === 403) { errMsg = 'Google refused the key. Open ⚙ settings, forget it, and paste a working Gemini key.'; done = true; break; }
+            if (r.status === 429) { errMsg = 'Gemini\'s free limit was reached for the moment. Try again in a minute.'; done = true; break; }
+            if (r.status === 400 && think) continue;
+            errMsg = r.status >= 500 ? 'Gemini is busy right now. Try again in a moment.' : 'Gemini could not answer (' + r.status + (msg ? ': ' + msg.slice(0, 80) : '') + ').';
+            break;
+          }
+          const rd = r.body.getReader(), dec = new TextDecoder(); let buf = '', raf = 0;
+          const paint = () => { raf = 0; bubble.innerHTML = mdLite(ans.text); body.scrollTop = body.scrollHeight; };
+          for (;;) { const { value, done: end } = await rd.read(); if (end) break; buf += dec.decode(value, { stream: true });
+            let i; while ((i = buf.indexOf('\n')) >= 0) { const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1); if (!line.startsWith('data:')) continue;
+              try { const j = JSON.parse(line.slice(5)); ((j.candidates || [])[0] || {}).content && j.candidates[0].content.parts.forEach((p) => { if (p.text && !p.thought) ans.text += p.text; }); } catch (e) { /* partial */ } }
+            if (!raf) raf = requestAnimationFrame(paint); }
+          paint(); done = !!ans.text; if (!done) errMsg = 'Gemini returned an empty answer. Try asking again.'; else errMsg = '';
+          $('chatSub').textContent = 'Gemini · ' + model; break;
+        } catch (e) { if (e.name === 'AbortError') { done = true; break; } errMsg = 'Could not reach Gemini. Check your connection.'; break; }
+      }
+      if (done) break;
+    }
+    if (!ans.text) { ans.text = errMsg || 'Something went wrong.'; ans.err = true; bubble.classList.add('err'); bubble.innerHTML = mdLite(ans.text); }
+    CHAT.busy = false; CHAT.abort = null; $('chatForm').classList.remove('busy'); saveChat();
+  }
+  function chatOpen(prefill) {
+    chatBuild(); const c = $('chat'); c.classList.add('open'); c.setAttribute('aria-hidden', 'false'); document.body.classList.add('chatting');
+    chatRender(); if (prefill && aiKey()) chatSend(prefill); setTimeout(() => { const q = $('chatQ'); if (q && innerWidth > 720) q.focus(); }, 80);
+  }
+  function chatClose() { const c = $('chat'); if (!c) return; c.classList.remove('open'); c.setAttribute('aria-hidden', 'true'); document.body.classList.remove('chatting'); }
+
   /* ================= the overview page ================= */
   function greet() { const h = new Date().getHours(); return h < 5 ? 'Good night' : h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'; }
   function viewHome(M) {
     if (!D.stories.length) { M.append(el('section', { class: 'hero' }, el('div', { class: 'hero-l' }, el('h1', { class: 'grad', text: LIVE ? 'No confirmed stories yet.' : 'Collecting the first news…' }),
       el('p', { class: 'lede', text: 'This page fills itself in a minute.' })), el('div', { class: 'globe-hero skel' }))); return; }
-    const nNew = D.stories.filter(isNew).length, nUpd = D.stories.filter(isUpd).length, nBrk = DAY ? 0 : D.stories.filter((s) => s.breaking).length;
-    /* high-impact events */
-    const ev = eventsBar(); if (ev) M.append(ev);
-    /* hero: the morning trader's brief */
-    const lede = DAY ? 'The confirmed stories of ' + new Date(DAY + 'T12:00:00').toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' }) + '.'
-      : sinceMode() ? null : `${D.stories.length} confirmed stories today, each reported by two or more independent newsrooms or an official source.`;
-    const L = el('div', { class: 'hero-l' },
-      rv(el('div', { class: 'eyebrow live' }, DAY ? el('span', { class: 'dot off' }) : el('span', { class: 'dot' }), DAY ? 'Archive' : 'Morning brief · live', ' · ', new Date(DAY ? DAY + 'T12:00:00' : Date.now()).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' }), D.updated ? ' · updated ' + ago(D.updated) : ''), 0),
-      rv(el('h1', { class: 'grad', text: DAY ? 'From the archive.' : greet() + '.' }), 1),
-      rv(lede ? el('p', { class: 'lede', text: lede }) : el('p', { class: 'lede' }, `While you were away (${ago(since).replace(' ago', '')}), `, el('b', { text: nNew + ' new ' + (nNew === 1 ? 'story' : 'stories') }), ' broke', nUpd ? [' and ', el('b', { text: nUpd + ' moved forward' })] : '', nBrk ? [' — ', el('b', { class: 'red', text: nBrk + ' breaking' })] : '', '.'), 2),
-      regimeBadge() ? rv(regimeBadge(), 3) : null,
-      rv(el('div', { class: 'cta' }, el('button', { class: 'btn grad-btn big', onclick: () => openBrief() }, el('span', { class: 'play' }, '▶'), 'Play the 5-minute brief'),
-        el('button', { class: 'btn ghost big', onclick: () => { const t = $('charts') || $('top'); if (t) t.scrollIntoView({ behavior: 'smooth' }); } }, 'Live charts ↓')), 5));
-    const DR = driversBox();
-    M.append(el('section', { class: 'hero trader' }, L, el('div', { class: 'hero-r' }, DR ? rv(el('div', { class: 'glass drv-card' }, DR), 2) : null)));
-    const TB = tradersBrief(); if (TB) M.append(TB);
-    const LC = liveChart();
-    const CC = LC;
+    const shown = new Set();
+    /* 1. the market regime, right at the top */
+    const RB = regimeBar(); if (RB) M.append(rv(RB, 0));
+    /* 2. the lead story, highlighted, with what else is driving markets and the day in 60 seconds */
+    const lead = leadStory();
+    if (lead) { shown.add(lead.id); M.append(el('section', { class: 'ltop' + (DAY ? ' arch' : '') }, leadCard(lead), leadSide(lead))); }
+    if (DAY) M.append(el('p', { class: 'lede arch-l', text: 'The confirmed stories of ' + new Date(DAY + 'T12:00:00').toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' }) + '.' }));
     /* breaking */
-    if (!DAY) D.stories.filter((s) => s.breaking).sort((a, b) => b.n - a.n).slice(0, 2).forEach((s, i) => M.append(rv(act(el('div', { class: 'breaking glass' },
+    if (!DAY) D.stories.filter((s) => s.breaking && s !== lead).sort((a, b) => b.n - a.n).slice(0, 2).forEach((s, i) => M.append(rv(act(el('div', { class: 'breaking glass' },
       el('span', { class: 'bl' }, el('i'), 'Breaking'), el('span', { class: 'btx', text: s.title }), el('span', { class: 'fine', text: s.n + ' newsrooms · ' + ago(s.first) })), s.id), i)));
-    /* live charts: price × news, then positioning */
+    /* 3. headlines in pictures and the crypto spotlight */
+    const HL = headlinesSection(lead); if (HL) M.append(HL);
+    if (!DAY) spotlightSections().forEach((x) => M.append(x));
+    /* 4. event risk, the AI read of the day, the trader's brief */
+    const ev = eventsBar(); if (ev) M.append(ev);
+    const IM = impactSection(); if (IM) M.append(IM);
+    const TB = tradersBrief(); if (TB) M.append(TB);
+    /* 5. live charts: price × news, then positioning and breadth */
+    const LC = liveChart();
     if (LC) M.append(sec('Price × news', { id: 'charts', eyebrow: 'Live charts', sub: 'Bitcoin, gold, the S&P 500 and oil in 15-minute candles, with the confirmed news pinned where it broke, key levels and the trading sessions' }, LC));
     const dsec = derivSection(); if (dsec) M.append(dsec);
     const bsec = breadthSection(); if (bsec) M.append(bsec);
     /* while you were away */
-    const shown = new Set();
     if (sinceMode()) {
-      const A = D.stories.filter((s) => isNew(s) || isUpd(s)).sort((a, b) => imp(b) - imp(a)).slice(0, 8);
+      const A = D.stories.filter((s) => (isNew(s) || isUpd(s)) && !shown.has(s.id)).sort((a, b) => imp(b) - imp(a)).slice(0, 8);
       if (A.length) { A.forEach((s) => shown.add(s.id)); M.append(sec('While you were away', { id: 'away', eyebrow: 'Since ' + hm(since), sub: 'New and updated stories, most important first' },
         el('div', { class: 'list glass' }, A.map((s) => item(s))))); }
     }
-    /* top stories - bento */
-    const top = D.top.map((id) => BYID[id]).filter((s) => s && !shown.has(s.id)).slice(0, 6);
-    if (top.length) { top.forEach((s) => shown.add(s.id));
-      const sizes = { 1: ['wide'], 2: ['lg', 'lg'], 3: ['xl', 'md', 'md'], 4: ['xl', 'md', 'md', 'wide'], 5: ['xl', 'md', 'md', 'lg', 'lg'], 6: ['xl', 'md', 'md', 'sm', 'sm', 'sm'] }[top.length];
-      M.append(sec(DAY ? 'Top stories of the day' : 'Top stories', { id: 'top', eyebrow: 'The day', sub: 'In order of importance' }, el('div', { class: 'bento' }, top.map((s, i) => rv(tileB(s, sizes[i]), i))))); }
-    const HL = headlinesSection(); if (HL) M.append(HL);
-    if (!DAY) spotlightSections().forEach((x) => M.append(x));
     /* market pulse */
     const order = ['btc', 'eth', 'spx', 'ndx', 'gold', 'oil', 'gas', 'dxy', 'eur', 'jpy', 'lkr'];
     const ms = order.map((k) => MK[k]).filter((m) => m && isNum(m.p));
@@ -1011,7 +1220,7 @@
     /* narratives */
     const nsec = narrSection(); if (nsec) M.append(nsec);
     /* globe */
-    void CC; if (D.stories.some((s) => (s.places || []).length)) M.append(globeSection());
+    if (D.stories.some((s) => (s.places || []).length)) M.append(globeSection());
     /* every area */
     const cards = chapterOrder().map((c, i) => {
       const Ls = storiesOf(c), pick = Ls.slice(0, 3), mk = (MKT[c] || []).map((k) => MK[k]).filter((m) => m && isNum(m.p)).slice(0, 2);
@@ -1127,6 +1336,7 @@
         el('div', { class: 'fine', text: (s.dek ? 'Teaser from ' + (s.reports.find((r) => r.u === s.link) || {}).o + '. ' : '') + 'First reported ' + dshort(s.first) + ', ' + hm(s.first) + ' · latest ' + hm(s.last) }),
         m ? el('div', { class: 'mts one', style: { marginTop: '16px' } }, tile(m, true, 'today')) : null,
         el('div', { class: 'dr-act' }, el('a', { class: 'btn pri', href: s.link, target: '_blank', rel: 'noopener noreferrer' }, 'Read the full story ↗'), saveBtn(s),
+          el('button', { class: 'btn ask-mini', onclick: () => { closeDrawer(); chatOpen('Explain this story simply and its possible impact on markets: [s:' + s.id + '] ' + s.title); } }, el('span', { class: 'ai-orb sm' }), 'Ask AI'),
           el('button', { class: 'btn', onclick: () => copy([s]), text: '⧉ Copy' }), navigator.share ? el('button', { class: 'btn', onclick: () => navigator.share({ title: s.title, url: s.link }).catch(() => {}), text: '↗ Share' }) : null),
         el('h5', { text: 'How sure is this?' }), el('div', { class: 'explain', text: sure }),
         (s.places || []).length ? [el('h5', { text: 'Where' }), el('div', { class: 'chips' }, s.places.map((pp) => el('button', { onclick: () => openPlace(pp.p), text: pp.p })))] : null,
@@ -1256,12 +1466,15 @@
     alerts = !alerts; S.set('alerts', alerts); $('bell').classList.toggle('on', alerts); toast(alerts ? 'Alerts on: breaking news and your watch words' : 'Alerts off');
   };
   $('watchBtn').onclick = editWatch; $('playBtn').onclick = () => openBrief();
+  $('askBtn').onclick = () => chatOpen(); $('aiFab').onclick = () => chatOpen();
   $('home').onclick = (e) => { e.preventDefault(); if (DAY) loadDay(null); go('front'); };
   $('drShade').onclick = closeDrawer;
   $('searchBtn').onclick = () => { document.body.classList.toggle('searching'); if (document.body.classList.contains('searching')) $('q').focus(); };
   let qt = 0; $('q').addEventListener('input', (e) => { clearTimeout(qt); qt = setTimeout(() => { query = e.target.value.trim(); render(); }, 180); });
   document.addEventListener('keydown', (e) => {
     if (BM) { if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); step(1); } else if (e.key === 'ArrowLeft') step(-1); else if (e.key === 'Escape') { if ($('drawer').classList.contains('open')) closeDrawer(); else closeBrief(); } return; }
+    if (e.key === 'Escape' && document.body.classList.contains('chatting') && !$('drawer').classList.contains('open')) { chatClose(); return; }
+    if (e.key === '?' && !/INPUT|TEXTAREA/.test(document.activeElement.tagName)) { e.preventDefault(); chatOpen(); return; }
     if (e.key === 'Escape') { if ($('drawer').classList.contains('open')) closeDrawer(); else if (query) { query = ''; $('q').value = ''; render(); } }
     if (e.key === '/' && !/INPUT|TEXTAREA/.test(document.activeElement.tagName)) { e.preventDefault(); document.body.classList.add('searching'); $('q').focus(); }
   });

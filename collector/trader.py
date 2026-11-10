@@ -817,6 +817,61 @@ def ai_trader_brief(out, mk, stories, now):
     return prev if prev.get("bullets") and now - prev.get("at", 0) < 4 * 3600 else None
 
 
+def ai_impact(stories, mk, out, now):
+    """Gemini reads ALL of today's confirmed news (not just the top) plus the prices and writes the possible impact on each market.
+    Refreshed every 2 hours, or sooner when the key drivers change. Neutral, never advice."""
+    try:
+        import ai
+    except Exception:  # noqa
+        return None
+    if not ai.provider():
+        return None
+    prev = NET["read"](NET["state"] / "ai_impact.json", {})
+    drv = out.get("drivers") or []
+    age = now - prev.get("at", 0)
+    if prev.get("assets") and (age < 2 * 3600 and (prev.get("drivers") == drv or age < 3600)):
+        return prev
+    m = {x["k"]: x for x in mk if x.get("p") is not None}
+    L = sorted(stories, key=lambda s: (-s.get("impact", 1), -s["score"]))[:90]
+    lines = "\n".join(f'[{s["id"]}] ({s["cat"]}, {"official" if s["status"] == "OFFICIAL" else str(s["n"]) + " newsrooms"}, impact {s.get("impact", "?")}/10, '
+                      f'{round((now - s["first"]) / 3600, 1)}h ago) {s["title"]}' + (f' — {s["dek"][:140]}' if s.get("dek") else "") for s in L)
+    px = {k: {"price": m[k]["p"], "chg_24h_pct": round(m[k]["chg"], 2) if m[k].get("chg") is not None else None}
+          for k in ("btc", "eth", "sol", "gold", "oil", "spx", "ndx", "dxy", "tnx", "vix", "eur", "jpy") if k in m}
+    ev = [{"event": e["where"] + " " + e["title"], "hours_from_now": round((e["t"] - now) / 3600, 1), "forecast": e["f"], "previous": e["p"]}
+          for e in (out.get("cal") or []) if now - 3 * 3600 <= e["t"] <= now + 36 * 3600][:8]
+    prompt = ("You are the market analyst of a personal trading dashboard. Read ALL of today's confirmed news below (each item is confirmed by 2+ newsrooms "
+              "or an official source) together with the market numbers, and explain the POSSIBLE impact on markets. Think across all news: wars, politics, "
+              "central banks, data, energy, crypto, tech. Rules: plain simple English, neutral, factual, no advice, no buy/sell calls, describe what the news "
+              "could mean (possible impact), not certainties; use only the data given; cite story ids. Reply with JSON only:\n"
+              '{"headline":"one sentence overall read of the day for markets",'
+              '"mood":"RISK-ON|RISK-OFF|MIXED",'
+              '"assets":[{"k":"BTC|ETH|GOLD|OIL|SPX|USD|BONDS","dir":"UP|DOWN|MIXED","strength":1,"why":"max 22 words","ids":["story id"]}],'
+              '"themes":[{"name":"2-4 words","impact":"max 26 words on what it means for markets","ids":["story id"]}],'
+              '"watch":["max 18 words: a risk or event to watch next"]}\n'
+              "assets: all 7 keys, strength 1 (slight) to 3 (strong). themes: the 3 biggest. watch: 2 or 3 items.\n\n"
+              "MARKET NUMBERS: " + json.dumps(px) + "\nUPCOMING HIGH-IMPACT EVENTS: " + json.dumps(ev) +
+              "\nREGIME (from prices): " + str((out.get("regime") or {}).get("label")) + "\n\nTODAY'S CONFIRMED NEWS:\n" + lines)
+    try:
+        j, label = ai.ask_json(prompt, 2200)
+        ids = {s["id"] for s in stories}
+        assets = []
+        for a in j.get("assets", []):
+            k = str(a.get("k", "")).upper()
+            if k in ("BTC", "ETH", "GOLD", "OIL", "SPX", "USD", "BONDS") and str(a.get("dir", "")).upper() in ("UP", "DOWN", "MIXED"):
+                assets.append({"k": k, "dir": a["dir"].upper(), "s": max(1, min(3, int(a.get("strength") or 1))), "why": str(a.get("why", ""))[:220],
+                               "ids": [i for i in (a.get("ids") or []) if i in ids][:3]})
+        if assets:
+            res = {"headline": str(j.get("headline", ""))[:260], "mood": str(j.get("mood", "MIXED")).upper()[:10], "assets": assets,
+                   "themes": [{"name": str(t.get("name", ""))[:40], "impact": str(t.get("impact", ""))[:240], "ids": [i for i in (t.get("ids") or []) if i in ids][:4]}
+                              for t in j.get("themes", [])[:3] if t.get("name")],
+                   "watch": [str(w)[:160] for w in j.get("watch", [])[:3]], "n": len(L), "at": int(now), "by": label, "drivers": drv}
+            NET["write"](NET["state"] / "ai_impact.json", res)
+            return res
+    except Exception as e:  # noqa
+        print("  AI impact skipped:", str(e)[:240])
+    return prev if prev.get("assets") and age < 8 * 3600 else None
+
+
 # ---------------- alerts (Telegram / Discord) ----------------
 def alerts(stories, watch, btc_price, now):
     tok, chat, hook = (os.environ.get(k, "").strip() for k in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "DISCORD_WEBHOOK_URL"))
@@ -909,6 +964,7 @@ def run(day_stories, final_stories, mk, fng, calendar, watch, now):
            "derivatives": der, "liqs": liq, "events": events(final_stories, calendar, now), "cal": safe("calendar", lambda: econ_calendar(now), []),
            "breadth": safe("breadth", breadth), "ai_tags": ai}
     out["ai_brief"] = safe("AI trader brief", lambda: ai_trader_brief(out, mk, final_stories, now))
+    out["impact"] = safe("AI impact", lambda: ai_impact(final_stories, mk, out, now))
     out["alerts_sent"] = alerts(final_stories, watch, prices.get("BTC"), now)
     if NET.get("arch"):
         out["logged"] = keylog(final_stories, out["drivers"], mk, now)
@@ -921,7 +977,7 @@ def run(day_stories, final_stories, mk, fng, calendar, watch, now):
     print(f"  trader: candles {cs} · derivatives {','.join(sorted(srcs)) or 'none'} · flow {fl or 'none'} · liqs {lq or 'none'}"
           f" · L/S {','.join(sorted({v.get('ls_src', '-') for v in der.values() if isinstance(v, dict)}))} · regime {out['regime']['label']}"
           f" · calendar {len(out['cal'])} high-impact" + (f" (next {nxt['cur']} {nxt['title']} in {(nxt['t'] - now) / 3600:.1f}h)" if nxt else "") +
-          f" · breadth {br.get('up', '-')}/{br.get('n', '-')} up · AI brief {(out['ai_brief'] or {}).get('by', 'off')}"
+          f" · breadth {br.get('up', '-')}/{br.get('n', '-')} up · AI brief {(out['ai_brief'] or {}).get('by', 'off')} · AI impact {(out['impact'] or {}).get('by', 'off')}"
           f" · alerts {out['alerts_sent']} · key events +{out.get('logged', 0)}", flush=True)
     errs = {k: v["err"] for k, v in der.items() if isinstance(v, dict) and v.get("err")}
     if errs:

@@ -4,7 +4,7 @@
 <title>Trading Desk Daily Brief</title>
 <meta name="description" content="Only confirmed news. The whole day across world, war, economy, forex, commodities, energy, crypto and tech, each story reported by two or more independent newsrooms or an official source.">
 <meta name="theme-color" content="#05060A">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' wss://ws-feed.exchange.coinbase.com; font-src 'self'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' wss://ws-feed.exchange.coinbase.com https://generativelanguage.googleapis.com; font-src 'self'; base-uri 'none'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon-192.png">
@@ -24,6 +24,7 @@
       <button class="ib only-m" id="searchBtn" aria-label="Search">⌕</button>
       <button class="ib" id="watchBtn" title="Your watch words" aria-label="Watch words">★</button>
       <button class="ib" id="bell" title="Alerts for breaking news and your watch words" aria-label="Alerts">🔔</button>
+      <button class="ask" id="askBtn" title="Ask Brief AI about today's news (press ?)"><span class="ai-orb"></span><span class="ask-t">Ask Brief AI</span><kbd>?</kbd></button>
       <button class="btn grad-btn sm play" id="playBtn" title="Play the 5-minute brief"><span class="play">▶</span><span class="pt">Brief</span></button>
     </div>
   </div>
@@ -45,6 +46,7 @@
   <div class="bm-stage" id="bmStage"></div>
   <div class="bm-nav"><button class="ib" id="bmPrev" aria-label="Previous">‹</button><span class="fine">Tap or swipe · ← →</span><button class="ib" id="bmNext" aria-label="Next">›</button></div>
 </div>
+<button class="ai-fab" id="aiFab" aria-label="Ask Brief AI"><span class="ai-orb lg"></span></button>
 <div class="tip" id="tip" hidden></div>
 <div class="toast" id="toast" hidden></div>
 <script src="vendor/d3.min.js"></script>

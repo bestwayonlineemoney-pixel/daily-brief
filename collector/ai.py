@@ -79,7 +79,7 @@ def _gemini(prompt, max_tokens):
     today = time.strftime("%Y-%m-%d", time.gmtime(now))
     if st.get("day") != today:
         st.update(day=today, n=0)
-    if st.get("n", 0) >= int(conf.get("ai_daily_limit", 150)):
+    if st.get("n", 0) >= int(conf.get("ai_daily_limit", 220)):
         raise RuntimeError("today's AI budget is used up (%d calls), back tomorrow" % st["n"])
     cool = {m: t for m, t in (st.get("cool") or {}).items() if t > now}
     good = st.get("gemini")

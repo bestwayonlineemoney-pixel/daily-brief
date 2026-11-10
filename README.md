@@ -13,6 +13,9 @@ The whole day, sorted and easy to read. Every few minutes it reads about 90 news
   - crypto breadth: bitcoin dominance, total crypto value, how many of the top 100 coins are up, top gainers and losers
   - a trader's brief at the top: market regime, event risk, positioning, liquidations, levels and breadth in a few lines (written by AI when a key is set)
   - a narrative heatmap and the 3 key drivers of the day
+- opens with the **market regime** across the top and the **lead story** highlighted with its photo, what else is driving markets and "the day in 60 seconds"
+- has a **Possible market impact** section: Gemini reads all of today's confirmed news and explains what it could mean for bitcoin, ether, gold, oil, the S&P 500, the dollar and bonds, with the big themes and what to watch next (needs `GEMINI_API_KEY`)
+- has **Brief AI**, a chat (Ask Brief AI button, the floating button on phones, or press `?`) that answers from today's confirmed news and market numbers, in English or Sinhala, and links the stories it uses. Your Gemini key is pasted once in the chat and stays only in your browser
 - tags every story with a tone (bullish / bearish / neutral, from a keyword list or AI when a key is set), an impact score from 1 to 10 and the assets it touches
 - can send instant Telegram or Discord alerts for impact 8+/10 stories or watch words (add `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` or `DISCORD_WEBHOOK_URL` as GitHub secrets)
 - has a **Macro** page with the latest official numbers (inflation, jobs, interest rates, growth for the US, euro area, UK and Japan) straight from the BLS, BEA, Federal Reserve, Treasury, ECB and others via the St. Louis Fed's FRED, plus an optional calendar of upcoming releases
