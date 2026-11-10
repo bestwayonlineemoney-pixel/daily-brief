@@ -99,11 +99,10 @@ def _gemini(prompt, max_tokens):
                 gap = time.time() - st.get("last", 0)
                 if gap < 9:
                     time.sleep(9 - gap)               # stay under the per-minute limit
-                gen = {"maxOutputTokens": max_tokens, "temperature": 0.3, "responseMimeType": "application/json"}
-                if think and "gemini-2.5" in model:
-                    gen["thinkingConfig"] = {"thinkingBudget": 0}
-                elif think:
-                    think = False
+                old_gen = "gemini-2.5" in model
+                gen = {"maxOutputTokens": max_tokens if old_gen else max_tokens + 6000, "temperature": 0.3, "responseMimeType": "application/json"}
+                if think:                          # keep the model's hidden "thinking" short so the answer is not cut off
+                    gen["thinkingConfig"] = {"thinkingBudget": 0} if old_gen else {"thinkingLevel": "low"}
                 body = json.dumps({"contents": [{"role": "user", "parts": [{"text": prompt}]}], "generationConfig": gen}).encode()
                 st["last"] = time.time()
                 st["n"] = st.get("n", 0) + 1
@@ -112,6 +111,11 @@ def _gemini(prompt, max_tokens):
                                      headers={"x-goog-api-key": key, "Content-Type": "application/json", "Accept-Encoding": "identity"})
                     j = json.loads(raw)
                     txt = "".join(p.get("text", "") for c in j.get("candidates", [])[:1] for p in (c.get("content") or {}).get("parts", []))
+                    fin = str((j.get("candidates") or [{}])[0].get("finishReason") or "")
+                    if txt and fin == "MAX_TOKENS" and not re.search(r"\}\s*$", txt):
+                        last = f"{model}: reply cut off (MAX_TOKENS)"
+                        tried.append(f"{model}=cut")
+                        break
                     if not txt:
                         last = "empty reply (" + str((j.get("candidates") or [{}])[0].get("finishReason") or j.get("promptFeedback")) + ")"
                         tried.append(f"{model}=empty")
@@ -167,5 +171,8 @@ def ask_json(prompt, max_tokens=1200):
     txt = re.sub(r"^```(?:json)?|```$", "", txt.strip(), flags=re.M).strip()
     m = re.search(r"\{.*\}", txt, re.S)
     if not m:
-        raise RuntimeError("AI reply was not JSON")
-    return json.loads(m.group(0)), label
+        raise RuntimeError("AI reply was not JSON (" + label + "): " + txt[:90].replace("\n", " "))
+    try:
+        return json.loads(m.group(0)), label
+    except ValueError as e:
+        raise RuntimeError(f"AI reply was not valid JSON ({label}): {e}")
