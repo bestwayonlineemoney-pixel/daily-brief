@@ -616,7 +616,7 @@ def ai_brief(top, conf):
         got = [{"text": str(x["text"])[:300], "ids": [str(i) for i in (x.get("ids") or [])][:3]} for x in j.get("lines", []) if x.get("text")][:8]
         return {"by": "ai", "model": label, "lines": got} if got else None
     except Exception as e:  # noqa
-        print("  AI summary skipped:", str(e)[:140])
+        print("  AI summary skipped:", str(e)[:240])
         return None
 
 

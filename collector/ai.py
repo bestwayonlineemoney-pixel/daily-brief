@@ -61,50 +61,86 @@ def _discover(key):
         ver = float(v.group(1)) if v else (99 if "latest" in n else 0)
         return (("flash" in n) * 2 + ("lite" not in n), "preview" not in n and "exp" not in n, ver)
     names = sorted(set(names), key=rank, reverse=True)[:6]
+    if names:
+        print("  Gemini models available:", ", ".join(names), flush=True)
     if names and NET.get("write"):
         NET["write"](NET["state"] / "ai_models_list.json", {"at": int(time.time()), "models": names})
     return names
 
 
 def _gemini(prompt, max_tokens):
+    """Free Gemini keys have small per-minute and per-day limits, so: calls are spaced out, a daily budget is kept,
+    and a model that hits its limit is rested while the next available model is tried."""
+    import time
     key = os.environ["GEMINI_API_KEY"].strip()
     conf = NET.get("conf") or {}
-    good = (NET["read"](NET["state"] / "ai_model.json", {}) if NET.get("read") else {}).get("gemini")
-    models = [m for m in [conf.get("gemini_model"), good] + _discover(key) + GEMINI_MODELS if m]
-    models = list(dict.fromkeys(models))[:7]
+    st = (NET["read"](NET["state"] / "ai_model.json", {}) if NET.get("read") else {}) or {}
+    now = time.time()
+    today = time.strftime("%Y-%m-%d", time.gmtime(now))
+    if st.get("day") != today:
+        st.update(day=today, n=0)
+    if st.get("n", 0) >= int(conf.get("ai_daily_limit", 150)):
+        raise RuntimeError("today's AI budget is used up (%d calls), back tomorrow" % st["n"])
+    cool = {m: t for m, t in (st.get("cool") or {}).items() if t > now}
+    good = st.get("gemini")
+    found = _discover(key)
+    models = [m for m in list(dict.fromkeys([m for m in [conf.get("gemini_model"), good] + found + GEMINI_MODELS if m])) if m not in cool][:6]
+    if not models:
+        raise RuntimeError("all Gemini models are resting after hitting Google's limits, will retry later")
     last, tried = None, []
-    for model in models:
-        for think in (True, False):           # 2.5 models accept a zero thinking budget (cheaper, faster); newer ones may not
-            gen = {"maxOutputTokens": max_tokens, "temperature": 0.3, "responseMimeType": "application/json"}
-            if think:
-                gen["thinkingConfig"] = {"thinkingBudget": 0}
-            body = json.dumps({"contents": [{"role": "user", "parts": [{"text": prompt}]}], "generationConfig": gen}).encode()
-            try:
-                raw = NET["get"](f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent", timeout=60, data=body,
-                                 headers={"x-goog-api-key": key, "Content-Type": "application/json", "Accept-Encoding": "identity"})
-                j = json.loads(raw)
-                txt = "".join(p.get("text", "") for c in j.get("candidates", [])[:1] for p in (c.get("content") or {}).get("parts", []))
-                if not txt:
-                    last = "empty reply (" + str((j.get("candidates") or [{}])[0].get("finishReason") or j.get("promptFeedback")) + ")"
+
+    def save():
+        st["cool"] = cool
+        if NET.get("write"):
+            NET["write"](NET["state"] / "ai_model.json", st)
+    try:
+        for model in models:
+            for think in (True, False):           # 2.5 models accept a zero thinking budget (cheaper, faster); newer ones may not
+                gap = time.time() - st.get("last", 0)
+                if gap < 9:
+                    time.sleep(9 - gap)               # stay under the per-minute limit
+                gen = {"maxOutputTokens": max_tokens, "temperature": 0.3, "responseMimeType": "application/json"}
+                if think and "gemini-2.5" in model:
+                    gen["thinkingConfig"] = {"thinkingBudget": 0}
+                elif think:
+                    think = False
+                body = json.dumps({"contents": [{"role": "user", "parts": [{"text": prompt}]}], "generationConfig": gen}).encode()
+                st["last"] = time.time()
+                st["n"] = st.get("n", 0) + 1
+                try:
+                    raw = NET["get"](f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent", timeout=90, data=body,
+                                     headers={"x-goog-api-key": key, "Content-Type": "application/json", "Accept-Encoding": "identity"})
+                    j = json.loads(raw)
+                    txt = "".join(p.get("text", "") for c in j.get("candidates", [])[:1] for p in (c.get("content") or {}).get("parts", []))
+                    if not txt:
+                        last = "empty reply (" + str((j.get("candidates") or [{}])[0].get("finishReason") or j.get("promptFeedback")) + ")"
+                        tried.append(f"{model}=empty")
+                        break
+                    st["gemini"] = model
+                    return txt, "Gemini " + model
+                except urllib.error.HTTPError as e:
+                    msg = _err_msg(e)
+                    last = f"{model}: HTTP {e.code} {msg[:90]}"
+                    tried.append(f"{model}={e.code}")
+                    if "API_KEY" in msg or "API key" in msg or e.code in (401, 403):
+                        raise RuntimeError(f"Gemini key refused (HTTP {e.code} {msg}) - check the GEMINI_API_KEY secret")
+                    if e.code == 429:              # rest this model: a day for a daily limit, 20 minutes otherwise
+                        cool[model] = now + (6 * 3600 if re.search(r"per ?day|PerDay|daily", msg, re.I) else 20 * 60)
+                        break
+                    if e.code == 404:
+                        cool[model] = now + 7 * 86400
+                        break
+                    if e.code == 400 and think:
+                        continue                    # retry the same model without the thinking setting
                     break
-                if NET.get("write") and good != model:
-                    NET["write"](NET["state"] / "ai_model.json", {"gemini": model})
-                return txt, "Gemini " + model
-            except urllib.error.HTTPError as e:
-                msg = _err_msg(e)
-                last = f"{model}: HTTP {e.code} {msg}"
-                tried.append(f"{model}{'' if think else '(plain)'}={e.code}")
-                if "API_KEY" in msg or "API key" in msg or e.code in (401, 403):
-                    raise RuntimeError(f"Gemini key refused (HTTP {e.code} {msg}) - check the GEMINI_API_KEY secret")
-                if e.code == 429:
-                    raise RuntimeError(f"Gemini rate limit reached (HTTP 429 {msg[:80]}), will retry next run")
-                if e.code == 400 and think:
-                    continue                    # retry the same model without the thinking setting
-                break                           # 404 model not found etc: try the next model
-            except Exception as e:  # noqa
-                last = f"{model}: {str(e)[:80]}"
-                tried.append(f"{model}=err")
+                except Exception as e:  # noqa
+                    last = f"{model}: {str(e)[:80]}"
+                    tried.append(f"{model}=err")
+                    break
+            if len(tried) >= 4:
                 break
+    finally:
+        save()
     raise RuntimeError("Gemini unavailable: " + str(last) + " · tried " + ", ".join(tried))
 
 

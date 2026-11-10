@@ -107,9 +107,11 @@ def ai_tags(stories, now):
     if not ai.provider():
         return 0
     cache = NET["read"](NET["state"] / "ai_tags.json", {})
-    cache = {k: v for k, v in cache.items() if v.get("at", 0) > now - 3 * 86400}
+    last_call = cache.pop("__last", {}).get("at", 0) if isinstance(cache.get("__last"), dict) else 0
+    cache = {k: v for k, v in cache.items() if isinstance(v, dict) and v.get("at", 0) > now - 3 * 86400}
     todo = [s for s in stories[:40] if s["id"] not in cache][:25]
-    if todo:
+    if todo and (len(todo) >= 5 or now - last_call > 30 * 60):        # batch new stories: at most one call per run, small ones every 30 min
+        cache["__last"] = {"at": now}
         lines = "\n".join(f'[{s["id"]}] {s["title"]}' + (f' — {s["dek"][:160]}' if s.get("dek") else "") for s in todo)
         prompt = ("For each confirmed news headline below, judge its likely effect on crypto and other risk assets today. Reply with JSON only: "
                   '{"items":[{"id":"...","sentiment":"BULLISH|BEARISH|NEUTRAL","why":"one plain sentence, max 18 words, on why it matters for prices"}]}. '
@@ -121,7 +123,10 @@ def ai_tags(stories, now):
                 if it.get("id") and it.get("sentiment") in ("BULLISH", "BEARISH", "NEUTRAL"):
                     cache[str(it["id"])] = {"sentiment": it["sentiment"], "why": str(it.get("why", ""))[:200], "at": now}
         except Exception as e:  # noqa
-            print("  AI tags skipped:", str(e)[:120])
+            print("  AI tags skipped:", str(e)[:240])
+        NET["write"](NET["state"] / "ai_tags.json", cache)
+    else:
+        cache["__last"] = {"at": last_call}
         NET["write"](NET["state"] / "ai_tags.json", cache)
     used = 0
     for s in stories:
@@ -808,7 +813,7 @@ def ai_trader_brief(out, mk, stories, now):
             NET["write"](NET["state"] / "ai_trader.json", res)
             return res
     except Exception as e:  # noqa
-        print("  AI trader brief skipped:", str(e)[:140])
+        print("  AI trader brief skipped:", str(e)[:240])
     return prev if prev.get("bullets") and now - prev.get("at", 0) < 4 * 3600 else None
 
 
